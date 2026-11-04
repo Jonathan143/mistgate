@@ -1,0 +1,39 @@
+services:
+  mistgate:
+    image: ${MISTGATE_IMAGE:-ghcr.io/jonathan143/mistgate:main}
+    container_name: mistgate
+    init: true
+    restart: unless-stopped
+
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+
+    environment:
+      MISTGATE_PUBLIC_URL: "https://${PANEL_DOMAIN:?Set PANEL_DOMAIN in .env}"
+      MISTGATE_SOURCE_URL: https://github.com/Jonathan143/mistgate
+      TZ: ${TZ:-Asia/Taipei}
+
+    volumes:
+      - ./data:/var/lib/mistgate
+
+    command:
+      - serve
+      - --listen
+      - ":443"
+      - --acme-domain
+      - "${PANEL_DOMAIN:?Set PANEL_DOMAIN in .env}"
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

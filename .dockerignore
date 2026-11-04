@@ -1,0 +1,14 @@
+# Avoid copying runtime data, development caches or secrets into image builds.
+.git
+.github
+.env
+.env.*
+!.env.example
+data
+**/node_modules
+web/dist
+site/dist
+**/.cache
+**/*.log
+*.tar.gz
+*.zip

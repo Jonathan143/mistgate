@@ -9,7 +9,7 @@
 
 - 构建当前 Fork 的 React/TypeScript 前端，再由 Go 将 `web/dist` 内嵌编译到面板；
 - 构建 `linux/amd64` 和 `linux/arm64`；
-- 推送到 `ghcr.io/jonathan143/mistgate:main`、`:latest`、`:sha-<short-hash>`；
+- 推送到 `ghcr.io/jonathan143/mistgate-panel:main`、`:latest`、`:sha-<short-hash>`；
 - 检查多架构镜像 manifest，并运行 Linux amd64 的 `mistgate version`。
 
 Actions 使用 `GITHUB_TOKEN` 与 `packages: write`，一般不需要自行创建 PAT。**GitHub Fork 的 Actions 可能默认关闭**，需要在本仓库的 Actions 页面启用。首次创建 GHCR Package 后，默认可能是 Private，需要到 Package 设置中改为 Public 才能匿名拉取。

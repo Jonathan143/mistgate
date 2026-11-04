@@ -1,6 +1,6 @@
 services:
   mistgate:
-    image: ${MISTGATE_IMAGE:-ghcr.io/jonathan143/mistgate:main}
+    image: ${MISTGATE_IMAGE:-ghcr.io/jonathan143/mistgate-panel:main}
     container_name: mistgate
     init: true
     restart: unless-stopped

@@ -13,6 +13,7 @@ import { zh as telegramZh } from "./telegram";
 import { zh as portsZh } from "./ports";
 import { zh as editionZh } from "./edition";
 import { zh as decoyZh } from "./decoy";
+import { zh as bulkZh } from "./bulk";
 import { zh as countryZh } from "./country";
 import { zh as connectionsZh } from "./connections";
 import { zh as journalZh } from "./journal";
@@ -20,6 +21,15 @@ import { zh as relayZh } from "./relay";
 import { zh as waysZh } from "./ways";
 import { zh as tgproxyZh } from "./tgproxy";
 import { zh as protocolsZh } from "./protocols";
+import { zh as aiZh } from "./ai";
+import { zh as graphZh } from "./graph";
+import { zh as waysgraphZh } from "./waysgraph";
+import { zh as fleetmapZh } from "./fleetmap";
+import { zh as observabilityZh } from "./observability";
+import { zh as debugZh } from "./debug";
+import { zh as resourcesZh } from "./resources";
+import { zh as tasksZh } from "./tasks";
+import { zh as followupZh } from "./followup";
 
 // Simplified Chinese (zh-CN). Typed against the English shape: a missing or extra key fails `pnpm typecheck`. Plurals: one form, no "|".
 // `core` is the shell, auth and navigation copy (what ru.ts keeps in its own `core`).
@@ -75,7 +85,7 @@ const core: CoreMessages = {
   "section.health.desc": "告警、客户端视角检测和集群诊断。",
   "section.reachability.desc": "能否从某个国家境内访问节点：各个来源、每个节点的结论及其最近一周。",
   "section.updates.desc": "面板和节点 Agent 的版本、分批滚动更新与回滚。",
-  "section.integrations.desc": "脚本使用的 API 令牌、供 AI 智能体使用的 MCP，以及需要你审批的变更。",
+  "section.integrations.desc": "Telegram 提醒：每位管理员都可以绑定自己的聊天。",
   "section.settings.desc": "管理员、安全、备份和域名。",
   "section.empty": "这里还没有内容",
 
@@ -151,6 +161,13 @@ const core: CoreMessages = {
   "settings.accent.rose": "玫瑰红",
   "settings.accent.sage": "鼠尾草绿",
   "settings.local": "这些选择只保存在此设备上。",
+  "settings.fx": "出现动画",
+  "settings.fx.beta": "测试版",
+  "settings.fx.show": "演示",
+  "settings.fx.create": "创建内容时",
+  "settings.fx.save": "保存内容或助手回答时",
+  "settings.fx.pages": "打开页面时",
+  "settings.fx.hint": "新的节点、用户、分组或配置会在一道轻柔的彩色光波下显现，一圈柔和的光环从你按下的按钮处扩散开。关闭，或系统设置了减少动态效果时，新内容会直接出现。",
   "settings.device": "仅限此设备",
 
   "auth.setup.welcomeTitle": "你好！",
@@ -274,4 +291,4 @@ const core: CoreMessages = {
   "field.reality.target_kind.invalid_enum": "本节点站点或其他站点",
 };
 
-export const zh: Messages = { ...core, ...opsZh, ...usersZh, ...securityZh, ...profilesZh, ...subsZh, ...healthZh, ...updatesZh, ...awgZh, ...warpZh, ...integrationsZh, ...telegramZh, ...portsZh, ...editionZh, ...decoyZh, ...countryZh, ...connectionsZh, ...journalZh, ...relayZh, ...waysZh, ...tgproxyZh, ...protocolsZh };
+export const zh: Messages = { ...core, ...opsZh, ...usersZh, ...securityZh, ...profilesZh, ...subsZh, ...healthZh, ...updatesZh, ...awgZh, ...warpZh, ...integrationsZh, ...telegramZh, ...portsZh, ...editionZh, ...decoyZh, ...bulkZh, ...countryZh, ...connectionsZh, ...journalZh, ...relayZh, ...waysZh, ...tgproxyZh, ...protocolsZh, ...aiZh, ...graphZh, ...waysgraphZh, ...fleetmapZh, ...observabilityZh, ...debugZh, ...resourcesZh, ...tasksZh, ...followupZh };

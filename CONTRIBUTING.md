@@ -42,7 +42,7 @@ make gen                              # buf lint + buf generate after editing pr
 
 End-to-end tests:
 
-- `scripts/e2e-wsl.sh [--keep] [--m3 | --awg | --warp | --mihomo | --m3-only | --old-node <path>]`: the panel, a node,
+- `scripts/e2e-wsl.sh [--keep | --hold] [--m3 | --awg | --warp | --mihomo | --m3-only | --old-node <path>]`: the panel, a node,
   a real Hysteria2 client and self-update, optionally AmneziaWG clients, a fake WARP peer and a real mihomo. Runs as
   root in WSL in its own network namespace (`wsl -d Ubuntu -u root -- bash scripts/e2e-wsl.sh` from the repo root);
   needs go, curl, jq, python3 (with yaml for the tunnel steps), openssl, nft, ip, and internet access. 3 to 10 minutes.
@@ -55,6 +55,19 @@ End-to-end tests:
   reloaded in the middle of an upload; `--ssh-only` skips the traffic steps.
 - `scripts/e2e-mcp.sh [-mode listener|prefix|both] [-keep]`: API tokens and MCP against a real panel on loopback, any
   OS, no internet, about a minute.
+- `scripts/e2e-wsl.sh --censor`: the isolated private-address TSPU lab; real node probes and client measurements assert
+  `block_diagnosis` for IP/port/UDP blocks, TCP throttling, whitelist and operator-specific behavior, and a failed inbound.
+  Run before a release that changes block diagnosis or its probe evidence.
+- `scripts/e2e-wsl.sh --mcp-fleet`: starts the throwaway dev fleet, runs the full MCP read-tool sweep and no-secrets scan, then
+  tears it down. Run before each release that changes MCP tools or their read contracts.
+- `scripts/dev-fleet.sh [--netem "delay 25ms loss 0.5%"] | --down`: a throwaway panel and three node agents (de1, nl1, fi1) in
+  network namespaces on one Linux host (WSL as root), for a coding agent to run `path_probe`, `node_trace`, `path_speed` and
+  `checks_run_now` against real agents; prints the admin URL and an MCP token. See
+  [AI agents](docs/en/getting-started/ai-agents.md).
+- `scripts/bench.sh [--engines ...] [--variants ...] [--repeat 3] [--update]`: the engine benchmark suite (Hysteria2, VLESS,
+  AmneziaWG; throughput, CPU per GB, latency under load, memory, handshakes; netem variants) against
+  `internal/node/bench/baseline.json`, as root in WSL. Not run on pull requests; see
+  [Benchmarks](docs/en/reference/benchmarks.md#engine-benchmark-suite).
 
 Every stable tag builds a draft release in GitHub Actions; a maintainer rebuilds it from the tag on a machine with the
 offline release key and signs only binaries that rebuild byte for byte. The whole procedure:

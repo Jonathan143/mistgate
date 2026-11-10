@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
@@ -107,6 +108,14 @@ type sessionOwner struct {
 	cancel     context.CancelCauseFunc
 }
 
+type networkASNCacheEntry struct {
+	address   string
+	bundleSHA string
+	builtUnix int64
+	asn       uint32
+	expires   time.Time
+}
+
 // Fleet is the fleet module.
 type Fleet struct {
 	st  *store.Store
@@ -116,6 +125,12 @@ type Fleet struct {
 	log *slog.Logger
 	now func() time.Time
 	ca  *ca
+
+	networkMode          atomic.Uint32
+	networkOperator      func(string, uint32) string // optional test seam; production uses health.NetworkOperator
+	networkTableOverride networkTableReader          // optional test seam for names that need output cleaning
+	networkASNMu         sync.Mutex
+	networkASNs          map[string]networkASNCacheEntry
 
 	tlsMu  sync.Mutex
 	tlsCfg *tls.Config
@@ -158,6 +173,7 @@ type Fleet struct {
 	sendUDP       func(context.Context, string, []uint16, [8]byte, int, int, int) (string, int, error)
 	probeTCP      func(context.Context, string, []tcpcheck.Target) (string, map[uint16]string, error)
 	settleUDP     func(context.Context) error
+	probes        probeState                 // on-demand probes between nodes (path_probe.go); its zero value is ready
 	panelIPv6     func(context.Context) bool // tests: whether the panel itself can send over IPv6; default panelHasIPv6
 }
 
@@ -216,6 +232,15 @@ func New(st *store.Store, v *vault.Vault, reg *protocols.Registry, cfg Config) (
 		// state and settled: it saturates the link for a moment.
 		measureWait: 50 * time.Second, measureDelay: 45 * time.Second,
 	}
+	mode := uint32(0)
+	if cfg.Remote != nil {
+		mode = 0
+	} else if stored, err := st.NetworkMode(context.Background()); err != nil {
+		cfg.Log.Error("fleet: read network setting; network statistics are disabled", "code", "network_setting_read_failed", "err", err)
+	} else {
+		mode = stored
+	}
+	f.networkMode.Store(mode)
 	c, err := loadCA(context.Background(), st, v, cfg.Now().UTC())
 	if err != nil {
 		return nil, fmt.Errorf("fleet: panel CA: %w", err)

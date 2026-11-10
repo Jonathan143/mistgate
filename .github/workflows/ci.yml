@@ -3,18 +3,27 @@ on:
   push:
     branches: [main]
   pull_request:
+  # by hand (gh workflow run ci.yml --ref main): GitHub can drop a push event, and then nothing else starts the run
+  workflow_dispatch:
 
 jobs:
   race:
-    # The agent session (panel and node) is concurrent by design; the race detector guards it.
+    # The agent session (panel and node) is concurrent by design; the race detector guards it. Each fleet test opens a
+    # migrated store; migrating a new file takes 4.3 s under -race, which with four hundred tests and 116 migrations pushed
+    # the job past 50 min in November 2026. The tests now open a copy of a database migrated once per binary
+    # (internal/panel/store/storetest): fleet takes 137 s under -race on a workstation (was 1790 s), agent 150 s. The limit
+    # keeps a wide margin for hosted runners, which are about 1.7 times slower; a package that needs more is a finding.
+    # internal/node/vless is left out: every race it reports is inside xray-core (Vision's TrafficState, shared by both
+    # copy directions and still unsynchronised in v26.11.9; the XHTTP upload queue and client, fixed upstream), and xray's
+    # rawInput offset trick trips checkptr. Recheck after an xray-core bump with
+    # go test -race -gcflags=github.com/xtls/xray-core/...=-d=checkptr=0 -count=5 ./internal/node/vless/
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      # fleet takes 12-20 min under -race on a hosted runner (700-1200 s on the same code, by runner), so 20 min cut it twice
-      - run: go test -race -count=1 -timeout 35m ./internal/panel/fleet/ ./internal/node/agent/
+      - run: go test -race -count=1 -timeout 50m ./internal/panel/fleet/ ./internal/node/agent/
   edge-store:
     runs-on: ubuntu-24.04
     steps:

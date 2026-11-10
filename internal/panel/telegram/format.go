@@ -144,6 +144,9 @@ var checkTitles = map[string]localizedText{
 	"cert_expiry":     {en: "Certificates", ru: "Сертификаты", zh: "证书"},
 	"memory_pressure": {en: "Memory", ru: "Память", zh: "内存"},
 	"cpu_softirq":     {en: "CPU softirq", ru: "CPU softirq", zh: "CPU softirq"},
+	"cpu_steal":       {en: "CPU steal", ru: "CPU steal", zh: "CPU 窃取时间"},
+	"conntrack_fill":  {en: "Connection tracking", ru: "Таблица соединений", zh: "连接跟踪表"},
+	"agent_fds":       {en: "Agent's open files", ru: "Открытые файлы агента", zh: "Agent 打开的文件"},
 	"kernel_headers":  {en: "Kernel headers", ru: "Заголовки ядра", zh: "内核头文件"},
 	"awg_backend":     {en: "AmneziaWG module", ru: "Модуль AmneziaWG", zh: "AmneziaWG 模块"},
 	"warp_path":       {en: "WARP is down", ru: "WARP не работает", zh: "WARP 异常"},
@@ -174,7 +177,7 @@ var updateReasons = map[string]localizedText{
 	"inbound_failed":       {en: "a profile that worked before broke", ru: "сломался профиль, который работал до обновления", zh: "之前正常的协议配置出了故障"},
 	"probe_failed":         {en: "the client-eye check failed", ru: "не прошла проверка глазами клиента", zh: "客户端视角检测失败"},
 	"not_reconnected":      {en: "the node did not come back within 3 minutes", ru: "нода не вернулась на связь за 3 минуты", zh: "节点未在 3 分钟内重新连接"},
-	"no_answer":            {en: "the node did not answer the update command in 10 minutes", ru: "нода не ответила на команду обновления за 10 минут", zh: "节点未在 10 分钟内响应更新命令"},
+	"no_answer":            {en: "the node did not answer within its download window", ru: "нода не ответила в отведённое для загрузки время", zh: "节点未在其下载窗口内响应"},
 	"rolled_back_by_agent": {en: "the node went back to the previous version by itself", ru: "нода сама вернулась на прошлую версию", zh: "节点自行回到了上一个版本"},
 	"agent_failed":         {en: "the node reported that the update failed", ru: "нода сообщила, что обновление не удалось", zh: "节点报告更新失败"},
 }
@@ -232,6 +235,12 @@ func alertTitle(l L, a store.HealthAlert) string {
 		return l.pick("Torrent attempts", "Попытки качать торренты", "BT 下载尝试")
 	case "port_lossy":
 		return l.pick("UDP packets are being lost", "Теряются UDP-пакеты", "UDP 正在丢包")
+	case "agent_crash_loop":
+		return l.pick("The node agent keeps crashing", "Агент ноды постоянно падает", "节点 Agent 反复崩溃")
+	case "scheduled_check":
+		return l.pick("Scheduled check found a problem", "Задача по расписанию нашла проблему", "计划任务发现了问题")
+	case "scheduled_task_failing":
+		return l.pick("Scheduled task keeps failing", "Задача по расписанию не выполняется", "计划任务持续失败")
 	case "path_lossy":
 		return l.pick("UDP packets are lost on the way to a node", "UDP-пакеты потеряны по пути к ноде", "UDP 测试包在到达节点的路上丢失")
 	case "device_limit":
@@ -369,6 +378,16 @@ func alertReason(l L, a store.HealthAlert) string {
 		return deviceLimitReason(l, p)
 	case "port_lossy":
 		return portLossReason(l, p)
+	case "scheduled_check":
+		task, summary := data(p["task"], 80), data(p["summary"], 300)
+		return l.pick("Task "+task+": "+summary, "Задача "+task+": "+summary, "任务 "+task+"："+summary)
+	case "scheduled_task_failing":
+		task, n, reason := data(p["task"], 80), data(p["count"], 4), data(p["reason"], 40)
+		return l.pick("Task "+task+" failed "+n+" runs in a row ("+reason+").", "Задача "+task+" не выполнилась "+n+" раз подряд ("+reason+").",
+			"任务 "+task+" 连续 "+n+" 次运行失败（"+reason+"）。")
+	case "agent_crash_loop":
+		n, w := data(p["count"], 4), data(p["window_min"], 4)
+		return l.pick("The agent crashed and restarted "+n+" times in "+w+" minutes.", "Агент упал и перезапустился "+n+" раз за "+w+" минут.", "Agent 在 "+w+" 分钟内崩溃并重启了 "+n+" 次。")
 	case "path_lossy":
 		return pathLossReason(l, p)
 	case "country_blocked":
@@ -545,6 +564,19 @@ func pathLossReason(l L, p map[string]string) string {
 		percent = strconv.FormatUint(((sent-got)*100+sent/2)/sent, 10)
 	}
 	arrived := data(p["other_got"], 6) + "/" + data(p["sent"], 6)
+	if open := data(p["open"], 100); open != "" {
+		// A filter, not a lossy line: some ports arrive whole, the rest not at all (health.alert.path_lossy.why.filtered).
+		return l.pick("UDP from "+sender+" ("+region+") reaches "+target+" only on "+open+"; ports "+ports+" get nothing, "+
+			"while from "+other+" ("+otherRegion+") everything arrives. A filter on the way, often the hoster's DDoS protection against "+
+			"data-centre traffic: "+target+" itself is fine and people on home networks usually connect, but port checks (and a relay) from "+
+			sender+" cannot pass.",
+			"UDP от "+sender+" ("+region+") доходит до "+target+" только на "+open+"; на порты "+ports+" — ничего, "+
+				"а от "+other+" ("+otherRegion+") доходит всё. Это фильтр по пути, часто защита хостера от DDoS из датацентров: сам "+
+				target+" в порядке и люди из домашних сетей обычно подключаются, но проверки портов (и ретрансляция) от "+sender+" не пройдут.",
+			"从"+sender+"（"+region+"）到"+target+"的 UDP 只在 "+open+" 上能到达；端口 "+ports+" 完全收不到，"+
+				"而从"+other+"（"+otherRegion+"）全部到达。这是路径上的过滤，常见于服务商针对数据中心流量的 DDoS 防护："+target+
+				"本身正常，家庭网络的用户通常能连接，但来自"+sender+"的端口检测（以及中转）无法通过。")
+	}
 	return l.pick("UDP from "+sender+" ("+region+") to "+target+" loses "+percent+"% on ports "+ports+
 		"; from "+other+" ("+otherRegion+") it arrives "+arrived+". The loss is on the way from "+sender+", not on "+target+".",
 		"UDP от "+sender+" ("+region+") к "+target+" теряет "+percent+"% пакетов на портах "+ports+
@@ -844,6 +876,7 @@ var toolTitles = map[string]localizedText{
 	"user_reset_traffic":          {en: "Reset users’ traffic", ru: "Сбросить трафик пользователей", zh: "重置用户流量"},
 	"device_revoke":               {en: "Remove a device", ru: "Удалить устройство", zh: "移除设备"},
 	"alert_mute":                  {en: "Mute an alert", ru: "Заглушить алерт", zh: "静默告警"},
+	"alert_close":                 {en: "Close an alert", ru: "Закрыть алерт", zh: "关闭告警"},
 	"node_fix":                    {en: "Fix a node", ru: "Исправить ноду", zh: "修复节点"},
 	"rollout_start":               {en: "Update a node now", ru: "Обновить ноду сейчас", zh: "立即更新节点"},
 	"rollout_pause":               {en: "Pause the rollout", ru: "Поставить раскатку на паузу", zh: "暂停滚动更新"},
@@ -852,6 +885,8 @@ var toolTitles = map[string]localizedText{
 	"node_update_schedule":        {en: "Schedule a node update", ru: "Запланировать обновление ноды", zh: "定时更新节点"},
 	"node_update_schedule_cancel": {en: "Cancel a scheduled node update", ru: "Отменить запланированное обновление ноды", zh: "取消节点的定时更新"},
 	"update_timezone":             {en: "Change the time zone of update schedules", ru: "Сменить часовой пояс расписания обновлений", zh: "更改更新计划的时区"},
+	"update_download_timeout":     {en: "Change the update download timeout", ru: "Изменить тайм-аут загрузки обновлений", zh: "更改更新下载超时"},
+	"retention":                   {en: "Change how long the panel keeps its data", ru: "Изменить сроки хранения данных панели", zh: "更改面板的数据保留时间"},
 	"node_rollback":               {en: "Roll a node back", ru: "Откатить ноду", zh: "回滚节点"},
 	"node_install":                {en: "Install a node over SSH", ru: "Установить ноду по SSH", zh: "通过 SSH 安装节点"},
 	"node_server_password_rotate": {en: "Change a node’s SSH password", ru: "Сменить SSH-пароль ноды", zh: "更改节点的 SSH 密码"},
@@ -874,6 +909,14 @@ func planWaitingText(l L, tool, token, adminURL string) string {
 		l.pick("“"+data(token, 40)+"” wants to: "+title+".", "«"+data(token, 40)+"» хочет: "+title+".", "「"+data(token, 40)+"」请求："+title+"。"),
 		l.pick("It expires in 10 minutes.", "Он истечёт через 10 минут.", "10 分钟后过期。"),
 		link(adminURL, "integrations", l.pick("Open Integrations → Waiting for you", "Открыть «Интеграции» → «Ждут тебя»", "打开「集成 → 待你审批」")),
+	)
+}
+
+func followUpProblemText(l L, summary, adminURL string) string {
+	return join(
+		"<b>"+l.pick("The assistant came back with a problem", "Ассистент вернулся с проблемой", "AI 助手回来报告了一个问题")+"</b>",
+		data(summary, 300),
+		link(adminURL, "ai?tab=memory", l.pick("Open the conversation in AI → Memory", "Открыть разговор в «ИИ» → «Память»", "在「AI → 记忆」中打开对话")),
 	)
 }
 

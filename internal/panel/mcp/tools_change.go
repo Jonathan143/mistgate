@@ -1,3 +1,5 @@
+//go:build !js
+
 package mcp
 
 import (
@@ -32,9 +34,9 @@ const (
 func changeTools() []toolDef {
 	var out []toolDef
 	for _, g := range [][]toolDef{
-		change(userCreate), change(userUpdate), change(userDisable), change(userEnable), change(userResetTraffic), change(deviceRevoke), change(alertMute),
+		change(userCreate), change(userUpdate), change(userDisable), change(userEnable), change(userResetTraffic), change(deviceRevoke), change(alertMute), change(alertClose),
 		change(warpRestart), change(warpReregister),
-		change(nodeFix), change(rolloutStart), change(nodeUpdateSchedule), change(nodeUpdateScheduleCancel), change(updateTimezone),
+		change(nodeFix), change(rolloutStart), change(nodeUpdateSchedule), change(nodeUpdateScheduleCancel), change(updateTimezone), change(updateDownloadTimeout),
 		change(rolloutPause), change(rolloutResume), change(rolloutCancel), change(nodeRollback),
 		change(nodeDecoy),
 	} {
@@ -1016,6 +1018,49 @@ var alertMute = changeSpec[alertMuteArgs]{
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// alert_close
+
+type alertCloseArgs struct {
+	ReasonField
+	AlertID string `json:"alert_id"`
+}
+
+var alertClose = changeSpec[alertCloseArgs]{
+	name: "alert_close", min: ProfileOperator,
+	procs: procs(adminv1connect.HealthServiceListAlertsProcedure, adminv1connect.HealthServiceDismissAlertProcedure),
+	desc:  "Close an active alert. It is resolved now (\"dismissed\" in the history), sends no notification and stays closed while the same problem continues; it opens again only if the problem stops and returns, or gets worse.",
+	plan: func(c *call, a alertCloseArgs) (*planned, error) {
+		if err := validID("alert_id", a.AlertID); err != nil {
+			return nil, err
+		}
+		r, err := c.cl.Health.ListAlerts(c.ctx, connect.NewRequest(&adminv1.ListAlertsRequest{}))
+		if err != nil {
+			return nil, apiError(err)
+		}
+		for _, al := range r.Msg.GetActive() {
+			if al.GetId() != a.AlertID {
+				continue
+			}
+			kind, sev := enumName("ALERT_KIND_", al.GetKind().String()), enumName("ALERT_SEVERITY_", al.GetSeverity().String())
+			return &planned{
+				Summary: "Close one active alert: it stays closed while the problem continues.",
+				Facts: []Fact{
+					codedFact("alert", kind+", "+sev, "alert", "kind", kind, "severity", sev),
+					{Key: "node", Value: nm(al.GetNodeName()), Untrusted: true},
+				},
+			}, nil
+		}
+		return nil, errors.New("no such active alert")
+	},
+	apply: func(c *call, a alertCloseArgs, _ Plan) (done, error) {
+		if _, err := c.cl.Health.DismissAlert(c.ctx, connect.NewRequest(&adminv1.DismissAlertRequest{AlertId: a.AlertID})); err != nil {
+			return done{}, apiError(err)
+		}
+		return doneWith("alert_closed", "Alert closed."), nil
+	},
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // node_fix
 
 type nodeFixArgs struct {
@@ -1308,6 +1353,37 @@ var updateTimezone = changeSpec[updateTimezoneArgs]{
 			return done{}, apiError(err)
 		}
 		return doneWith("update_timezone_changed", "Schedule time zone set to "+updateTimezoneName(r.Msg.GetTimezoneOffsetMinutes())+".", "offset_minutes", strconv.Itoa(int(r.Msg.GetTimezoneOffsetMinutes()))), nil
+	},
+}
+
+type updateDownloadTimeoutArgs struct {
+	ReasonField
+	TimeoutSeconds uint32 `json:"timeout_seconds" jsonschema:"maximum time for an agent update download, from 300 to 7200 seconds"`
+}
+
+var updateDownloadTimeout = changeSpec[updateDownloadTimeoutArgs]{
+	name: "update_download_timeout", min: ProfileAdmin, danger: true,
+	procs: procs(adminv1connect.UpdateServiceGetUpdatesProcedure, adminv1connect.UpdateServiceSetUpdateDownloadTimeoutProcedure),
+	desc:  "Set the maximum time an agent may spend downloading its signed update binary.",
+	plan: func(c *call, a updateDownloadTimeoutArgs) (*planned, error) {
+		if a.TimeoutSeconds < 300 || a.TimeoutSeconds > 7200 {
+			return nil, errors.New("timeout_seconds must be from 300 to 7200")
+		}
+		u, err := c.updates()
+		if err != nil {
+			return nil, err
+		}
+		return &planned{Summary: "Change the maximum agent update download time.", Facts: []Fact{
+			codedFact("from", "seconds", "seconds", "n", strconv.FormatUint(uint64(u.GetUpdateDownloadTimeoutSeconds()), 10)),
+			codedFact("to", "seconds", "seconds", "n", strconv.FormatUint(uint64(a.TimeoutSeconds), 10)),
+		}, Danger: []string{dangerStepUp}, Params: a}, nil
+	},
+	apply: func(c *call, a updateDownloadTimeoutArgs, _ Plan) (done, error) {
+		r, err := c.cl.Update.SetUpdateDownloadTimeout(c.ctx, connect.NewRequest(&adminv1.SetUpdateDownloadTimeoutRequest{TimeoutSeconds: a.TimeoutSeconds}))
+		if err != nil {
+			return done{}, apiError(err)
+		}
+		return doneWith("update_download_timeout_changed", "Agent update download timeout changed.", "timeout_seconds", strconv.FormatUint(uint64(r.Msg.GetTimeoutSeconds()), 10)), nil
 	},
 }
 

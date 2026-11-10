@@ -52,10 +52,16 @@ The **Apps & formats** tab lists the apps the protocols work with and what each 
 
 Both are built from the same profiles and the same access as the link list. They differ in what a format can carry ([What works where](#what-works-where)) and in how the app is wired.
 
-- **Xray JSON** is an array of configs, one per server; the server's name is the `remarks` of its config. Each config opens a local SOCKS proxy on `127.0.0.1:10808`, which the app's own VPN mode feeds. Other apps on the device can see that port, and some VPN checks look for it. There is no HTTP proxy, no API and no statistics port. The DNS preset is written into every config.
-- **sing-box JSON** is one profile: a switch with every server (the first is the default), a TUN interface, and the DNS preset. It opens no local proxy. It needs sing-box 1.12 or newer.
+- **Xray JSON** is an array of configs, one per server; the server's name is the `remarks` of its config. When automatic selection is on, an `Auto` config with every server comes first. Each config opens a local SOCKS proxy on `127.0.0.1:10808`, which the app's own VPN mode feeds. Other apps on the device can see that port, and some VPN checks look for it. There is no HTTP proxy, no API and no statistics port. The DNS preset is written into every config.
+- **sing-box JSON** is one profile: a selector with every server, a TUN interface, and the DNS preset. When automatic selection is on, its `Auto` option tests the servers; otherwise the first server is the default. It opens no local proxy. It needs sing-box 1.12 or newer.
 
 The names follow the template of [Names & texts](#names-texts). Xray JSON keeps the link list's 30-character limit and, for Happ, the load; sing-box JSON keeps the full names and never adds the load.
+
+### Automatic server choice
+
+When **Automatic server choice**, a card under the rules of **Who gets what**, is on (the default), Mihomo/Clash YAML and sing-box JSON include an `Auto` group, and Xray JSON an `Auto` config first, that tests each server at `https://www.gstatic.com/generate_204` every five minutes. The check goes through the server being tested, so a site blocked on the user's home connection does not affect it. A new install starts on `Auto`; a person's manual pick in the app remains in effect. With one server, there is no `Auto`. This setting does not affect AmneziaVPN, nor Happ on the link list, which has no groups.
+
+The Xray `Auto` config holds every server and sends traffic through a `leastPing` balancer fed by Xray's observatory: each new connection takes the server that answered fastest at the last check, the first server until the first check is in. Unlike Mihomo's `url-test`, it has no tolerance, so when two servers answer about as fast, new connections may move between them after a check.
 
 **Planned:** subscription mirrors.
 
@@ -77,7 +83,7 @@ A server that a format cannot carry is left out of that format without a word, a
 | The WARP copy of any of these | as its original | as its original | as its original | as its original |
 
 - sing-box has no XHTTP transport and cannot check a self-signed certificate by its fingerprint. Gecko is carried by Mihomo only.
-- AmneziaWG reaches an app only through Mihomo YAML or an AmneziaVPN key.
+- AmneziaWG reaches an app only through Mihomo YAML or an AmneziaVPN key. The first can be turned off: [AmneziaWG in apps on the link](#amneziawg-in-apps-on-the-link).
 - MTProto is in no format. A `tg://proxy` line would be a broken server in every VPN app, so the Telegram links come only from the person's page and the admin ([MTProto](mtproto.md)).
 - A WARP copy is the node's exit; nothing changes on the client, so it follows the profile it copies.
 - A person for whom a format has no server at all gets a placeholder entry: see [When no server fits the app](#when-no-server-fits-the-app).
@@ -100,6 +106,19 @@ What counts as a browser: a User-Agent that starts with `Mozilla/`, has a browse
 **Try a User-Agent**: paste what an app sends, or pick an example, and the tab shows which rule takes it ("Rule 2 matches → Mihomo YAML", "Nothing matched, and it looks like a browser → web page", "Nothing matched → link list"). The examples include `sing-box` and `v2rayNG`.
 
 **Trying a format on one request.** `?format=xray-json` or `?format=sing-box` at the end of a subscription link picks the format for that request, whatever the rules say. It is meant for trying an app that no rule names yet. It grants nothing more than a rule does: a link nobody owns still gets the fake 404, a link whose rule is **Fake 404** stays the fake 404, and any other value is ignored. The user page never shows a link with the parameter.
+
+## AmneziaWG in apps on the link
+
+kl!ck and the other Mihomo apps get the AmneziaWG servers in their profile along with the rest. Happ and the other apps that read the link list never get them: their formats cannot carry AmneziaWG. The switch **AmneziaWG in apps on the link**, a card under the rules of **Who gets what**, takes AmneziaWG out of the apps on the link. It is on by default, and a panel that is updated keeps it on.
+
+Turn it off when people use AmneziaWG in AmneziaVPN anyway: in a Mihomo app it often works worse. Then:
+
+- each Mihomo app gets the subscription without the AmneziaWG servers at its next refresh;
+- at that refresh the AmneziaWG keys of that app are removed, and their addresses in the AmneziaWG network are freed. The confirmation **Take AmneziaWG out of the apps on the link?** says how many keys the apps hold now; when they hold none, the switch turns off at once;
+- AmneziaVPN keys, the person's page and the other formats do not change;
+- a person whose only servers are AmneziaWG gets the placeholder entry in a Mihomo app: see [When no server fits the app](#when-no-server-fits-the-app).
+
+Turned back on, the apps get new keys at their next refresh. While it is off, **Apps & formats** strikes AmneziaWG out on the Mihomo card and links to the switch.
 
 ## Device limit for apps on the link
 
@@ -142,7 +161,7 @@ Every answer to an app carries, besides the servers, the headers subscription ap
 | `Routing` | The link list for Happ only: the person's DNS preset as a Happ routing profile. See [DNS](dns.md). The other formats carry their DNS inside, so they send no `Routing`. |
 | `Ping-Type`, `Ping-Result`, `Subscription-Ping-Onopen-Enabled` | Happ only, and only when **Ping in Happ** is not **App default**: how Happ pings the servers, the delay in ms, and whether it pings when it opens. See [Names & texts](#names-texts). |
 
-The Mihomo YAML, Xray JSON and sing-box JSON carry the same headers except `Routing`. The Mihomo YAML has one proxy group with every server and a `dns:` section; Xray JSON has one config per server; sing-box JSON has one switch with every server. Each takes the person's DNS preset in its own form.
+The Mihomo YAML, Xray JSON and sing-box JSON carry the same headers except `Routing`. The Mihomo YAML has a `select` group and, when enabled, an `Auto` group over the servers, plus a `dns:` section; Xray JSON has one config per server; sing-box JSON has one selector and, when enabled, an `Auto` URL test. Each takes the person's DNS preset in its own form.
 
 ## Extra servers: over IPv6 and through a relay
 
@@ -154,6 +173,8 @@ Next to a server of a node, an app can list up to two more, marked by a label af
 | ` · via RU` (ru ` · через RU`, zh ` · 经 RU`) | The server through a relay of an entry node, with the entry's country. | A [relay](relays.md) |
 
 The order is the node's server, its IPv6 server, then the servers through its relays; a relay's server is never doubled for IPv6. Both appear for every person who may use the node (and the entry node, for a relay), at the next refresh of the app. A server behind a CDN, one with a certificate for the node's IPv4 address, and the static AmneziaWG keys get no IPv6 server. The load of an IPv6 server in Happ is the node's. Names are kept within Happ's 30 characters: the label stays, the profile name is shortened first. The links of an [MTProto](mtproto.md#relays-and-ipv6-twins) profile get the same twins, in the person's Telegram block instead of the subscription.
+
+A server the owner keeps out of subscriptions on the node's **Ways in** tab (see [Nodes](nodes.md#direct)) is left out itself, while its IPv6 server and the servers through its relays stay.
 
 ## Names & texts
 
@@ -209,7 +230,7 @@ For such a person the refresh interval drops to 1 hour, so a fix (term extended,
 
 ### When no server fits the app
 
-Xray JSON and sing-box JSON never answer an active person with an empty document. When none of the person's servers can be carried in the format (all of them use XHTTP and the app reads sing-box, or the person has only AmneziaWG, or there is no server at all), the app gets one entry that never connects, named "Your servers do not work in this app. The subscription page shows which app does". The announcement carries the same text.
+Xray JSON and sing-box JSON never answer an active person with an empty document. When none of the person's servers can be carried in the format (all of them use XHTTP and the app reads sing-box, or the person has only AmneziaWG, or there is no server at all), the app gets one entry that never connects, named "Your servers do not work in this app. The subscription page shows which app does". The announcement carries the same text. A Mihomo app gets the same entry when AmneziaWG is taken out of the apps on the link and the person's only servers are AmneziaWG.
 
 In Russian: «Ваши серверы не работают в этом приложении. Какое подойдёт — на странице подписки».
 

@@ -989,10 +989,15 @@ type RolloutStep struct {
 	// download_failed, ...), and the gate's: not_reconnected, not_committed, state_not_applied, inbounds_unreadable,
 	// warp_down, inbound_failed, probe_failed, rolled_back_by_agent, no_answer, offline, unsupported, up_to_date,
 	// cancelled. Before 0.1.47 state_not_applied also stood for not_committed and inbounds_unreadable.
-	ErrorKey      string            `protobuf:"bytes,9,opt,name=error_key,json=errorKey,proto3" json:"error_key,omitempty"`
-	Params        map[string]string `protobuf:"bytes,10,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ErrorKey string            `protobuf:"bytes,9,opt,name=error_key,json=errorKey,proto3" json:"error_key,omitempty"`
+	Params   map[string]string `protobuf:"bytes,10,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Best-effort live download information while the step is SENT. Empty/zero when no progress was reported.
+	DownloadPhase   string `protobuf:"bytes,11,opt,name=download_phase,json=downloadPhase,proto3" json:"download_phase,omitempty"`
+	DownloadedBytes uint64 `protobuf:"varint,12,opt,name=downloaded_bytes,json=downloadedBytes,proto3" json:"downloaded_bytes,omitempty"`
+	TotalBytes      uint64 `protobuf:"varint,13,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	BytesPerSecond  uint64 `protobuf:"varint,14,opt,name=bytes_per_second,json=bytesPerSecond,proto3" json:"bytes_per_second,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RolloutStep) Reset() {
@@ -1093,6 +1098,34 @@ func (x *RolloutStep) GetParams() map[string]string {
 		return x.Params
 	}
 	return nil
+}
+
+func (x *RolloutStep) GetDownloadPhase() string {
+	if x != nil {
+		return x.DownloadPhase
+	}
+	return ""
+}
+
+func (x *RolloutStep) GetDownloadedBytes() uint64 {
+	if x != nil {
+		return x.DownloadedBytes
+	}
+	return 0
+}
+
+func (x *RolloutStep) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *RolloutStep) GetBytesPerSecond() uint64 {
+	if x != nil {
+		return x.BytesPerSecond
+	}
+	return 0
 }
 
 type Rollout struct {
@@ -1274,11 +1307,21 @@ type GetUpdatesResponse struct {
 	// bundle, when no node is behind it, or when the panel has not read the release notes (the Cloudflare edition never
 	// does: it has no bundle).
 	AgentNotes []*ReleaseNote `protobuf:"bytes,8,rep,name=agent_notes,json=agentNotes,proto3" json:"agent_notes,omitempty"`
-	// The same for this panel: every stable release newer than PanelBuild.version, up to PanelUpdate.version. Only while
+	// The same for this panel: every release visible to update_channel newer than PanelBuild.version, up to PanelUpdate.version. Only while
 	// PanelUpdate.available (a release whose signed panel manifest verified), else empty.
-	PanelNotes    []*ReleaseNote `protobuf:"bytes,9,rep,name=panel_notes,json=panelNotes,proto3" json:"panel_notes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PanelNotes []*ReleaseNote `protobuf:"bytes,9,rep,name=panel_notes,json=panelNotes,proto3" json:"panel_notes,omitempty"`
+	// The configured channel used for panel and node-bundle discovery (stable when the setting is unset).
+	UpdateChannel string `protobuf:"bytes,10,opt,name=update_channel,json=updateChannel,proto3" json:"update_channel,omitempty"`
+	// The channel encoded by PanelBuild.version, empty for an unstamped development build.
+	RunningVersionChannel string `protobuf:"bytes,11,opt,name=running_version_channel,json=runningVersionChannel,proto3" json:"running_version_channel,omitempty"`
+	// The channel encoded by PanelUpdate.version, empty when no release is known.
+	OfferedReleaseChannel string `protobuf:"bytes,12,opt,name=offered_release_channel,json=offeredReleaseChannel,proto3" json:"offered_release_channel,omitempty"`
+	// The signed manifest of the newest release visible to update_channel is older than this panel's build time.
+	RunningNewerThanChannelOffers bool `protobuf:"varint,13,opt,name=running_newer_than_channel_offers,json=runningNewerThanChannelOffers,proto3" json:"running_newer_than_channel_offers,omitempty"`
+	// Maximum time sent to new UpdateAgent commands, in seconds.
+	UpdateDownloadTimeoutSeconds uint32 `protobuf:"varint,14,opt,name=update_download_timeout_seconds,json=updateDownloadTimeoutSeconds,proto3" json:"update_download_timeout_seconds,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *GetUpdatesResponse) Reset() {
@@ -1374,6 +1417,41 @@ func (x *GetUpdatesResponse) GetPanelNotes() []*ReleaseNote {
 	return nil
 }
 
+func (x *GetUpdatesResponse) GetUpdateChannel() string {
+	if x != nil {
+		return x.UpdateChannel
+	}
+	return ""
+}
+
+func (x *GetUpdatesResponse) GetRunningVersionChannel() string {
+	if x != nil {
+		return x.RunningVersionChannel
+	}
+	return ""
+}
+
+func (x *GetUpdatesResponse) GetOfferedReleaseChannel() string {
+	if x != nil {
+		return x.OfferedReleaseChannel
+	}
+	return ""
+}
+
+func (x *GetUpdatesResponse) GetRunningNewerThanChannelOffers() bool {
+	if x != nil {
+		return x.RunningNewerThanChannelOffers
+	}
+	return false
+}
+
+func (x *GetUpdatesResponse) GetUpdateDownloadTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.UpdateDownloadTimeoutSeconds
+	}
+	return 0
+}
+
 // The notes of one GitHub release, as the maintainers wrote them in the release description. They are INFORMATIONAL and
 // NOT signed (the signed things are the manifests): the panel reads them over HTTPS from the official repository, like
 // the release check, and the SPA renders them with its own tiny markdown renderer, never as HTML. A description is
@@ -1393,7 +1471,9 @@ type ReleaseNote struct {
 	Zh string `protobuf:"bytes,6,opt,name=zh,proto3" json:"zh,omitempty"`
 	// A heading "Security", "Безопасность" or "安全" (any level) is in the notes: the SPA badges the release and tells the
 	// owner it is worth updating soon.
-	Security      bool `protobuf:"varint,7,opt,name=security,proto3" json:"security,omitempty"`
+	Security bool `protobuf:"varint,7,opt,name=security,proto3" json:"security,omitempty"`
+	// The release channel encoded by version: stable, testing or dev.
+	Channel       string `protobuf:"bytes,8,opt,name=channel,proto3" json:"channel,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1475,6 +1555,13 @@ func (x *ReleaseNote) GetSecurity() bool {
 		return x.Security
 	}
 	return false
+}
+
+func (x *ReleaseNote) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
 }
 
 type CheckPanelUpdateRequest struct {
@@ -2528,6 +2615,183 @@ func (x *SetUpdateTimezoneResponse) GetTimezoneOffsetMinutes() int32 {
 	return 0
 }
 
+type SetUpdateChannelRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// One of stable, testing or dev.
+	Channel       string `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetUpdateChannelRequest) Reset() {
+	*x = SetUpdateChannelRequest{}
+	mi := &file_mistgate_admin_v1_update_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetUpdateChannelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetUpdateChannelRequest) ProtoMessage() {}
+
+func (x *SetUpdateChannelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mistgate_admin_v1_update_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetUpdateChannelRequest.ProtoReflect.Descriptor instead.
+func (*SetUpdateChannelRequest) Descriptor() ([]byte, []int) {
+	return file_mistgate_admin_v1_update_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *SetUpdateChannelRequest) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+type SetUpdateChannelResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Channel       string                 `protobuf:"bytes,1,opt,name=channel,proto3" json:"channel,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetUpdateChannelResponse) Reset() {
+	*x = SetUpdateChannelResponse{}
+	mi := &file_mistgate_admin_v1_update_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetUpdateChannelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetUpdateChannelResponse) ProtoMessage() {}
+
+func (x *SetUpdateChannelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_mistgate_admin_v1_update_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetUpdateChannelResponse.ProtoReflect.Descriptor instead.
+func (*SetUpdateChannelResponse) Descriptor() ([]byte, []int) {
+	return file_mistgate_admin_v1_update_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *SetUpdateChannelResponse) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+type SetUpdateDownloadTimeoutRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	TimeoutSeconds uint32                 `protobuf:"varint,1,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SetUpdateDownloadTimeoutRequest) Reset() {
+	*x = SetUpdateDownloadTimeoutRequest{}
+	mi := &file_mistgate_admin_v1_update_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetUpdateDownloadTimeoutRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetUpdateDownloadTimeoutRequest) ProtoMessage() {}
+
+func (x *SetUpdateDownloadTimeoutRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_mistgate_admin_v1_update_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetUpdateDownloadTimeoutRequest.ProtoReflect.Descriptor instead.
+func (*SetUpdateDownloadTimeoutRequest) Descriptor() ([]byte, []int) {
+	return file_mistgate_admin_v1_update_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *SetUpdateDownloadTimeoutRequest) GetTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+type SetUpdateDownloadTimeoutResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	TimeoutSeconds uint32                 `protobuf:"varint,1,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *SetUpdateDownloadTimeoutResponse) Reset() {
+	*x = SetUpdateDownloadTimeoutResponse{}
+	mi := &file_mistgate_admin_v1_update_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetUpdateDownloadTimeoutResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetUpdateDownloadTimeoutResponse) ProtoMessage() {}
+
+func (x *SetUpdateDownloadTimeoutResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_mistgate_admin_v1_update_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetUpdateDownloadTimeoutResponse.ProtoReflect.Descriptor instead.
+func (*SetUpdateDownloadTimeoutResponse) Descriptor() ([]byte, []int) {
+	return file_mistgate_admin_v1_update_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *SetUpdateDownloadTimeoutResponse) GetTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
 var File_mistgate_admin_v1_update_proto protoreflect.FileDescriptor
 
 const file_mistgate_admin_v1_update_proto_rawDesc = "" +
@@ -2607,7 +2871,7 @@ const file_mistgate_admin_v1_update_proto_rawDesc = "" +
 	"\x11scheduled_version\x18\x0e \x01(\tR\x10scheduledVersion\x12+\n" +
 	"\x0fscheduled_built\x18\x0f \x01(\x03B\x020\x02R\x0escheduledBuilt\x12I\n" +
 	"!scheduled_timezone_offset_minutes\x18\x10 \x01(\x05R\x1escheduledTimezoneOffsetMinutes\x12)\n" +
-	"\x10scheduled_missed\x18\x11 \x01(\bR\x0fscheduledMissed\"\xbf\x03\n" +
+	"\x10scheduled_missed\x18\x11 \x01(\bR\x0fscheduledMissed\"\xe8\x04\n" +
 	"\vRolloutStep\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
 	"\tnode_name\x18\x02 \x01(\tR\bnodeName\x12\x14\n" +
@@ -2620,7 +2884,12 @@ const file_mistgate_admin_v1_update_proto_rawDesc = "" +
 	"\rfinished_unix\x18\b \x01(\x03B\x020\x02R\ffinishedUnix\x12\x1b\n" +
 	"\terror_key\x18\t \x01(\tR\berrorKey\x12B\n" +
 	"\x06params\x18\n" +
-	" \x03(\v2*.mistgate.admin.v1.RolloutStep.ParamsEntryR\x06params\x1a9\n" +
+	" \x03(\v2*.mistgate.admin.v1.RolloutStep.ParamsEntryR\x06params\x12%\n" +
+	"\x0edownload_phase\x18\v \x01(\tR\rdownloadPhase\x12-\n" +
+	"\x10downloaded_bytes\x18\f \x01(\x04B\x020\x02R\x0fdownloadedBytes\x12#\n" +
+	"\vtotal_bytes\x18\r \x01(\x04B\x020\x02R\n" +
+	"totalBytes\x12,\n" +
+	"\x10bytes_per_second\x18\x0e \x01(\x04B\x020\x02R\x0ebytesPerSecond\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe3\x03\n" +
@@ -2641,7 +2910,7 @@ const file_mistgate_admin_v1_update_proto_rawDesc = "" +
 	"\x10PauseParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x13\n" +
-	"\x11GetUpdatesRequest\"\xec\x03\n" +
+	"\x11GetUpdatesRequest\"\x94\x06\n" +
 	"\x12GetUpdatesResponse\x12\x1d\n" +
 	"\bnow_unix\x18\x01 \x01(\x03B\x020\x02R\anowUnix\x123\n" +
 	"\x05panel\x18\x02 \x01(\v2\x1d.mistgate.admin.v1.PanelBuildR\x05panel\x121\n" +
@@ -2653,7 +2922,13 @@ const file_mistgate_admin_v1_update_proto_rawDesc = "" +
 	"\vagent_notes\x18\b \x03(\v2\x1e.mistgate.admin.v1.ReleaseNoteR\n" +
 	"agentNotes\x12?\n" +
 	"\vpanel_notes\x18\t \x03(\v2\x1e.mistgate.admin.v1.ReleaseNoteR\n" +
-	"panelNotes\"\xb0\x01\n" +
+	"panelNotes\x12%\n" +
+	"\x0eupdate_channel\x18\n" +
+	" \x01(\tR\rupdateChannel\x126\n" +
+	"\x17running_version_channel\x18\v \x01(\tR\x15runningVersionChannel\x126\n" +
+	"\x17offered_release_channel\x18\f \x01(\tR\x15offeredReleaseChannel\x12H\n" +
+	"!running_newer_than_channel_offers\x18\r \x01(\bR\x1drunningNewerThanChannelOffers\x12E\n" +
+	"\x1fupdate_download_timeout_seconds\x18\x0e \x01(\rR\x1cupdateDownloadTimeoutSeconds\"\xca\x01\n" +
 	"\vReleaseNote\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12)\n" +
@@ -2661,7 +2936,8 @@ const file_mistgate_admin_v1_update_proto_rawDesc = "" +
 	"\x02en\x18\x04 \x01(\tR\x02en\x12\x0e\n" +
 	"\x02ru\x18\x05 \x01(\tR\x02ru\x12\x0e\n" +
 	"\x02zh\x18\x06 \x01(\tR\x02zh\x12\x1a\n" +
-	"\bsecurity\x18\a \x01(\bR\bsecurity\"\x19\n" +
+	"\bsecurity\x18\a \x01(\bR\bsecurity\x12\x18\n" +
+	"\achannel\x18\b \x01(\tR\achannel\"\x19\n" +
 	"\x17CheckPanelUpdateRequest\"R\n" +
 	"\x18CheckPanelUpdateResponse\x126\n" +
 	"\x06update\x18\x01 \x01(\v2\x1e.mistgate.admin.v1.PanelUpdateR\x06update\"o\n" +
@@ -2718,7 +2994,15 @@ const file_mistgate_admin_v1_update_proto_rawDesc = "" +
 	"\x18SetUpdateTimezoneRequest\x126\n" +
 	"\x17timezone_offset_minutes\x18\x01 \x01(\x05R\x15timezoneOffsetMinutes\"S\n" +
 	"\x19SetUpdateTimezoneResponse\x126\n" +
-	"\x17timezone_offset_minutes\x18\x01 \x01(\x05R\x15timezoneOffsetMinutes*\x9a\x01\n" +
+	"\x17timezone_offset_minutes\x18\x01 \x01(\x05R\x15timezoneOffsetMinutes\"3\n" +
+	"\x17SetUpdateChannelRequest\x12\x18\n" +
+	"\achannel\x18\x01 \x01(\tR\achannel\"4\n" +
+	"\x18SetUpdateChannelResponse\x12\x18\n" +
+	"\achannel\x18\x01 \x01(\tR\achannel\"J\n" +
+	"\x1fSetUpdateDownloadTimeoutRequest\x12'\n" +
+	"\x0ftimeout_seconds\x18\x01 \x01(\rR\x0etimeoutSeconds\"K\n" +
+	" SetUpdateDownloadTimeoutResponse\x12'\n" +
+	"\x0ftimeout_seconds\x18\x01 \x01(\rR\x0etimeoutSeconds*\x9a\x01\n" +
 	"\fBundleStatus\x12\x1d\n" +
 	"\x19BUNDLE_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15BUNDLE_STATUS_MISSING\x10\x01\x12\x19\n" +
@@ -2749,7 +3033,7 @@ const file_mistgate_admin_v1_update_proto_rawDesc = "" +
 	"\x11STEP_STATE_PASSED\x10\x04\x12\x15\n" +
 	"\x11STEP_STATE_FAILED\x10\x05\x12\x1a\n" +
 	"\x16STEP_STATE_ROLLED_BACK\x10\x06\x12\x16\n" +
-	"\x12STEP_STATE_SKIPPED\x10\a2\xff\t\n" +
+	"\x12STEP_STATE_SKIPPED\x10\a2\xf2\v\n" +
 	"\rUpdateService\x12Y\n" +
 	"\n" +
 	"GetUpdates\x12$.mistgate.admin.v1.GetUpdatesRequest\x1a%.mistgate.admin.v1.GetUpdatesResponse\x12k\n" +
@@ -2763,7 +3047,9 @@ const file_mistgate_admin_v1_update_proto_rawDesc = "" +
 	"\fRescanBundle\x12&.mistgate.admin.v1.RescanBundleRequest\x1a'.mistgate.admin.v1.RescanBundleResponse\x12q\n" +
 	"\x12ScheduleNodeUpdate\x12,.mistgate.admin.v1.ScheduleNodeUpdateRequest\x1a-.mistgate.admin.v1.ScheduleNodeUpdateResponse\x12\x83\x01\n" +
 	"\x18CancelNodeUpdateSchedule\x122.mistgate.admin.v1.CancelNodeUpdateScheduleRequest\x1a3.mistgate.admin.v1.CancelNodeUpdateScheduleResponse\x12n\n" +
-	"\x11SetUpdateTimezone\x12+.mistgate.admin.v1.SetUpdateTimezoneRequest\x1a,.mistgate.admin.v1.SetUpdateTimezoneResponseB\xc6\x01\n" +
+	"\x11SetUpdateTimezone\x12+.mistgate.admin.v1.SetUpdateTimezoneRequest\x1a,.mistgate.admin.v1.SetUpdateTimezoneResponse\x12k\n" +
+	"\x10SetUpdateChannel\x12*.mistgate.admin.v1.SetUpdateChannelRequest\x1a+.mistgate.admin.v1.SetUpdateChannelResponse\x12\x83\x01\n" +
+	"\x18SetUpdateDownloadTimeout\x122.mistgate.admin.v1.SetUpdateDownloadTimeoutRequest\x1a3.mistgate.admin.v1.SetUpdateDownloadTimeoutResponseB\xc6\x01\n" +
 	"\x15com.mistgate.admin.v1B\vUpdateProtoP\x01Z:github.com/mistgate/mistgate/gen/mistgate/admin/v1;adminv1\xa2\x02\x03MAX\xaa\x02\x11Mistgate.Admin.V1\xca\x02\x11Mistgate\\Admin\\V1\xe2\x02\x1dMistgate\\Admin\\V1\\GPBMetadata\xea\x02\x13Mistgate::Admin::V1b\x06proto3"
 
 var (
@@ -2779,7 +3065,7 @@ func file_mistgate_admin_v1_update_proto_rawDescGZIP() []byte {
 }
 
 var file_mistgate_admin_v1_update_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_mistgate_admin_v1_update_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_mistgate_admin_v1_update_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_mistgate_admin_v1_update_proto_goTypes = []any{
 	(BundleStatus)(0),                        // 0: mistgate.admin.v1.BundleStatus
 	(NodeUpdateState)(0),                     // 1: mistgate.admin.v1.NodeUpdateState
@@ -2818,21 +3104,25 @@ var file_mistgate_admin_v1_update_proto_goTypes = []any{
 	(*CancelNodeUpdateScheduleResponse)(nil), // 34: mistgate.admin.v1.CancelNodeUpdateScheduleResponse
 	(*SetUpdateTimezoneRequest)(nil),         // 35: mistgate.admin.v1.SetUpdateTimezoneRequest
 	(*SetUpdateTimezoneResponse)(nil),        // 36: mistgate.admin.v1.SetUpdateTimezoneResponse
-	nil,                                      // 37: mistgate.admin.v1.Bundle.ParamsEntry
-	nil,                                      // 38: mistgate.admin.v1.RolloutStep.ParamsEntry
-	nil,                                      // 39: mistgate.admin.v1.Rollout.PauseParamsEntry
+	(*SetUpdateChannelRequest)(nil),          // 37: mistgate.admin.v1.SetUpdateChannelRequest
+	(*SetUpdateChannelResponse)(nil),         // 38: mistgate.admin.v1.SetUpdateChannelResponse
+	(*SetUpdateDownloadTimeoutRequest)(nil),  // 39: mistgate.admin.v1.SetUpdateDownloadTimeoutRequest
+	(*SetUpdateDownloadTimeoutResponse)(nil), // 40: mistgate.admin.v1.SetUpdateDownloadTimeoutResponse
+	nil,                                      // 41: mistgate.admin.v1.Bundle.ParamsEntry
+	nil,                                      // 42: mistgate.admin.v1.RolloutStep.ParamsEntry
+	nil,                                      // 43: mistgate.admin.v1.Rollout.PauseParamsEntry
 }
 var file_mistgate_admin_v1_update_proto_depIdxs = []int32{
 	5,  // 0: mistgate.admin.v1.PanelBuild.update:type_name -> mistgate.admin.v1.PanelUpdate
 	0,  // 1: mistgate.admin.v1.Bundle.status:type_name -> mistgate.admin.v1.BundleStatus
 	6,  // 2: mistgate.admin.v1.Bundle.files:type_name -> mistgate.admin.v1.BundleFile
-	37, // 3: mistgate.admin.v1.Bundle.params:type_name -> mistgate.admin.v1.Bundle.ParamsEntry
+	41, // 3: mistgate.admin.v1.Bundle.params:type_name -> mistgate.admin.v1.Bundle.ParamsEntry
 	1,  // 4: mistgate.admin.v1.NodeUpdate.state:type_name -> mistgate.admin.v1.NodeUpdateState
 	8,  // 5: mistgate.admin.v1.NodeUpdate.last_update:type_name -> mistgate.admin.v1.LastUpdate
 	3,  // 6: mistgate.admin.v1.RolloutStep.state:type_name -> mistgate.admin.v1.StepState
-	38, // 7: mistgate.admin.v1.RolloutStep.params:type_name -> mistgate.admin.v1.RolloutStep.ParamsEntry
+	42, // 7: mistgate.admin.v1.RolloutStep.params:type_name -> mistgate.admin.v1.RolloutStep.ParamsEntry
 	2,  // 8: mistgate.admin.v1.Rollout.status:type_name -> mistgate.admin.v1.RolloutStatus
-	39, // 9: mistgate.admin.v1.Rollout.pause_params:type_name -> mistgate.admin.v1.Rollout.PauseParamsEntry
+	43, // 9: mistgate.admin.v1.Rollout.pause_params:type_name -> mistgate.admin.v1.Rollout.PauseParamsEntry
 	10, // 10: mistgate.admin.v1.Rollout.steps:type_name -> mistgate.admin.v1.RolloutStep
 	4,  // 11: mistgate.admin.v1.GetUpdatesResponse.panel:type_name -> mistgate.admin.v1.PanelBuild
 	7,  // 12: mistgate.admin.v1.GetUpdatesResponse.bundle:type_name -> mistgate.admin.v1.Bundle
@@ -2860,20 +3150,24 @@ var file_mistgate_admin_v1_update_proto_depIdxs = []int32{
 	31, // 34: mistgate.admin.v1.UpdateService.ScheduleNodeUpdate:input_type -> mistgate.admin.v1.ScheduleNodeUpdateRequest
 	33, // 35: mistgate.admin.v1.UpdateService.CancelNodeUpdateSchedule:input_type -> mistgate.admin.v1.CancelNodeUpdateScheduleRequest
 	35, // 36: mistgate.admin.v1.UpdateService.SetUpdateTimezone:input_type -> mistgate.admin.v1.SetUpdateTimezoneRequest
-	13, // 37: mistgate.admin.v1.UpdateService.GetUpdates:output_type -> mistgate.admin.v1.GetUpdatesResponse
-	16, // 38: mistgate.admin.v1.UpdateService.CheckPanelUpdate:output_type -> mistgate.admin.v1.CheckPanelUpdateResponse
-	18, // 39: mistgate.admin.v1.UpdateService.InstallPanelUpdate:output_type -> mistgate.admin.v1.InstallPanelUpdateResponse
-	20, // 40: mistgate.admin.v1.UpdateService.StartRollout:output_type -> mistgate.admin.v1.StartRolloutResponse
-	22, // 41: mistgate.admin.v1.UpdateService.PauseRollout:output_type -> mistgate.admin.v1.PauseRolloutResponse
-	24, // 42: mistgate.admin.v1.UpdateService.ResumeRollout:output_type -> mistgate.admin.v1.ResumeRolloutResponse
-	26, // 43: mistgate.admin.v1.UpdateService.CancelRollout:output_type -> mistgate.admin.v1.CancelRolloutResponse
-	28, // 44: mistgate.admin.v1.UpdateService.RollbackNode:output_type -> mistgate.admin.v1.RollbackNodeResponse
-	30, // 45: mistgate.admin.v1.UpdateService.RescanBundle:output_type -> mistgate.admin.v1.RescanBundleResponse
-	32, // 46: mistgate.admin.v1.UpdateService.ScheduleNodeUpdate:output_type -> mistgate.admin.v1.ScheduleNodeUpdateResponse
-	34, // 47: mistgate.admin.v1.UpdateService.CancelNodeUpdateSchedule:output_type -> mistgate.admin.v1.CancelNodeUpdateScheduleResponse
-	36, // 48: mistgate.admin.v1.UpdateService.SetUpdateTimezone:output_type -> mistgate.admin.v1.SetUpdateTimezoneResponse
-	37, // [37:49] is the sub-list for method output_type
-	25, // [25:37] is the sub-list for method input_type
+	37, // 37: mistgate.admin.v1.UpdateService.SetUpdateChannel:input_type -> mistgate.admin.v1.SetUpdateChannelRequest
+	39, // 38: mistgate.admin.v1.UpdateService.SetUpdateDownloadTimeout:input_type -> mistgate.admin.v1.SetUpdateDownloadTimeoutRequest
+	13, // 39: mistgate.admin.v1.UpdateService.GetUpdates:output_type -> mistgate.admin.v1.GetUpdatesResponse
+	16, // 40: mistgate.admin.v1.UpdateService.CheckPanelUpdate:output_type -> mistgate.admin.v1.CheckPanelUpdateResponse
+	18, // 41: mistgate.admin.v1.UpdateService.InstallPanelUpdate:output_type -> mistgate.admin.v1.InstallPanelUpdateResponse
+	20, // 42: mistgate.admin.v1.UpdateService.StartRollout:output_type -> mistgate.admin.v1.StartRolloutResponse
+	22, // 43: mistgate.admin.v1.UpdateService.PauseRollout:output_type -> mistgate.admin.v1.PauseRolloutResponse
+	24, // 44: mistgate.admin.v1.UpdateService.ResumeRollout:output_type -> mistgate.admin.v1.ResumeRolloutResponse
+	26, // 45: mistgate.admin.v1.UpdateService.CancelRollout:output_type -> mistgate.admin.v1.CancelRolloutResponse
+	28, // 46: mistgate.admin.v1.UpdateService.RollbackNode:output_type -> mistgate.admin.v1.RollbackNodeResponse
+	30, // 47: mistgate.admin.v1.UpdateService.RescanBundle:output_type -> mistgate.admin.v1.RescanBundleResponse
+	32, // 48: mistgate.admin.v1.UpdateService.ScheduleNodeUpdate:output_type -> mistgate.admin.v1.ScheduleNodeUpdateResponse
+	34, // 49: mistgate.admin.v1.UpdateService.CancelNodeUpdateSchedule:output_type -> mistgate.admin.v1.CancelNodeUpdateScheduleResponse
+	36, // 50: mistgate.admin.v1.UpdateService.SetUpdateTimezone:output_type -> mistgate.admin.v1.SetUpdateTimezoneResponse
+	38, // 51: mistgate.admin.v1.UpdateService.SetUpdateChannel:output_type -> mistgate.admin.v1.SetUpdateChannelResponse
+	40, // 52: mistgate.admin.v1.UpdateService.SetUpdateDownloadTimeout:output_type -> mistgate.admin.v1.SetUpdateDownloadTimeoutResponse
+	39, // [39:53] is the sub-list for method output_type
+	25, // [25:39] is the sub-list for method input_type
 	25, // [25:25] is the sub-list for extension type_name
 	25, // [25:25] is the sub-list for extension extendee
 	0,  // [0:25] is the sub-list for field type_name
@@ -2890,7 +3184,7 @@ func file_mistgate_admin_v1_update_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_mistgate_admin_v1_update_proto_rawDesc), len(file_mistgate_admin_v1_update_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   36,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

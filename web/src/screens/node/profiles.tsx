@@ -34,6 +34,7 @@ import { AwgStatusLine } from "./awg-status";
 import { DecoyNotice, portOk, sniPlaceholder, useInboundCheck, useInboundRefresh, WarpWarnings } from "./inbound-check";
 import { LossyNotice, lossyRefusal } from "./port-lossy";
 import { tcpPill, verdictPill } from "./ports";
+import { Fresh } from "@/components/fx/fresh";
 import { alsoRemovesText, useRelaysOf } from "./relays";
 
 export const states: Record<InboundState, { kind: StatusKind; word: MessageKey }> = {
@@ -80,8 +81,8 @@ function cells(t: T, fmt: Fmt, i: Plain<Inbound>, now: number, dot?: Cell["dot"]
 
 const toneText = { warn: "text-warn-text", bad: "text-danger-text" } as const;
 
-// The last column fits the longest pill ("Не запустился").
-const gridClass = "md:grid-cols-[minmax(0,1.4fr)_92px_minmax(0,0.7fr)_minmax(0,1.3fr)_minmax(0,1fr)_124px]";
+// The port column fits "udp/65535" with its dot (70 + 6 + 16 px) on one line; the last one the longest pill ("Не запустился").
+const gridClass = "md:grid-cols-[minmax(0,1.4fr)_96px_minmax(0,0.7fr)_minmax(0,1.3fr)_minmax(0,1fr)_124px]";
 
 /** The last port check of a profile's port, as a dot: its verdict on hover and to a screen reader, the check a click away. */
 function PortDot({ nodeId, dot }: { nodeId: string; dot: NonNullable<Cell["dot"]> }) {
@@ -192,7 +193,7 @@ export function ProfilesTab({ data, addProfile, onAddClosed }: { data: Plain<Get
             </Link>
           ) : null;
         return (
-          <div key={i.id} className="flex flex-col gap-2.5 rounded-card border border-line bg-surface px-4 py-3.5">
+          <Fresh key={i.id} kind="inbound" id={i.id} className="flex flex-col gap-2.5 rounded-card border border-line bg-surface px-4 py-3.5">
             <div className={`grid items-center gap-3 max-md:grid-cols-[minmax(0,1fr)_auto] ${gridClass}`}>
               <div className="flex min-w-0 items-center gap-2.5">
                 <IconChip icon="sliders" tone="sage" size={28} />
@@ -248,7 +249,7 @@ export function ProfilesTab({ data, addProfile, onAddClosed }: { data: Plain<Get
                 {t("node.profiles.remove")}
               </Button>
             </div>
-          </div>
+          </Fresh>
         );
       })}
 

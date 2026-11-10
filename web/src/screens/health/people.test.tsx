@@ -10,8 +10,11 @@ import { AlertsTab } from "./alerts";
 import { useFixFlow } from "./fix";
 import { PeopleTab } from "./people";
 
+const dismissAlert = vi.fn((..._a: unknown[]) => Promise.resolve({ alert: {} }));
+let assistantOn = false;
 vi.mock("@/lib/api", () => ({
-  health: { muteAlert: vi.fn(), acceptDoctorItem: vi.fn(), applyFix: vi.fn() },
+  assistant: { getAssistantAccess: () => Promise.resolve({ available: assistantOn }) },
+  health: { muteAlert: vi.fn(), dismissAlert: (...a: unknown[]) => dismissAlert(...a), acceptDoctorItem: vi.fn(), applyFix: vi.fn() },
   nodes: {},
   auth: { me: () => Promise.resolve({ admin: { id: "adm_1", role: Role.OWNER } }) },
   fleet: {},
@@ -181,9 +184,42 @@ describe("Health ▸ People", () => {
     expect(hrefs).toEqual(["/users/usr_masha", "/users/usr_oleg"]);
   });
 
+  it("opens the assistant with the access question in the composer, only when the assistant is on", async () => {
+    assistantOn = false;
+    await mount({ people: [ended()] });
+    expect(text()).not.toContain("Work out what does not open");
+    act(() => root?.unmount());
+    host?.remove();
+    assistantOn = true;
+    await mount({ people: [ended()] });
+    const button = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Work out what does not open")!;
+    expect(button).toBeTruthy();
+    const seen: unknown[] = [];
+    const listen = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("mistgate:assistant-open", listen);
+    await act(async () => void button.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    window.removeEventListener("mistgate:assistant-open", listen);
+    assistantOn = false;
+    expect(seen).toEqual([{ text: "Work out who cannot open what over the last day, and what to fix." }]);
+  });
+
   it("offers Mute like the other alerts", async () => {
     await mount({ people: [ended()] });
     expect([...document.querySelectorAll("button")].some((b) => b.textContent?.includes("Mute"))).toBe(true);
+  });
+
+  it("offers Close on each card and «Close all shown» for the list, asking with the count", async () => {
+    await mount({ people: [connection({ id: "c1" }), connection({ id: "c2", params: { user_name: "Ira", user_id: "usr_ira" } }), ended()] });
+    const buttons = [...document.querySelectorAll("button")].map((b) => b.textContent?.trim());
+    expect(buttons.filter((b) => b === "Close")).toHaveLength(3);
+    const all = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Close all shown")!;
+    await act(async () => void all.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(document.body.textContent).toContain("Close 3 alerts?");
+    expect(dismissAlert).not.toHaveBeenCalled();
+    const confirm = [...document.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Close").at(-1)!;
+    await act(async () => void confirm.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    for (let i = 0; i < 4; i++) await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
+    expect(dismissAlert).toHaveBeenCalledTimes(3);
   });
 
   it("says so when nothing is open, even with node alerts around", async () => {

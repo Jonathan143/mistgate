@@ -5,6 +5,20 @@ import (
 	"github.com/mistgate/mistgate/internal/panel/store"
 )
 
+// BackupDownloadProcedure is the plain HTTP archive route mounted beside Connect services.
+const BackupDownloadProcedure = "/backup/download"
+const BackupUploadProcedure = "/backup/upload"
+
+// The ProbeService procedures (proto/mistgate/probe/v1) as strings: importing probev1connect here would put the generated
+// messages into the Cloudflare Workers, which have no room for them and never serve the service. A test compares them with the
+// generated names.
+const (
+	PathProbeProcedure    = "/mistgate.probe.v1.ProbeService/PathProbe"
+	NodeTraceProcedure    = "/mistgate.probe.v1.ProbeService/NodeTrace"
+	NodeDnsCheckProcedure = "/mistgate.probe.v1.ProbeService/NodeDnsCheck"
+	PathSpeedProcedure    = "/mistgate.probe.v1.ProbeService/PathSpeed"
+)
+
 // level is how much of the admin API a procedure needs.
 type level int
 
@@ -52,11 +66,20 @@ var procedureLevels = map[string]level{
 	adminv1connect.FleetServiceOverviewProcedure:   levelRead,
 	adminv1connect.FleetServiceListEventsProcedure: levelRead,
 
-	adminv1connect.NodeServiceListNodesProcedure:           levelRead,
-	adminv1connect.NodeServiceGetNodeProcedure:             levelRead,
-	adminv1connect.NodeServiceGetNodeConnectionsProcedure:  levelRead,  // counts only, no address
-	adminv1connect.NodeServiceGetNodeJournalProcedure:      levelRead,  // addresses cut on the node and in the panel
+	adminv1connect.NodeServiceListNodesProcedure:          levelRead,
+	adminv1connect.NodeServiceGetNodeProcedure:            levelRead,
+	adminv1connect.NodeServiceGetNodeConnectionsProcedure: levelRead, // counts only, no address
+	adminv1connect.NodeServiceGetNodeJournalProcedure:     levelRead, // addresses cut on the node and in the panel
+	adminv1connect.NodeServiceGetNodeRuntimeProcedure:     levelRead, // desired vs applied: hashes, states, no address or pin
+	adminv1connect.NodeServiceGetNodeHostHistoryProcedure: levelRead, // hourly host load
+	adminv1connect.NodeServiceGetPathLossProcedure:        levelRead, // node names, never addresses
+	// On-demand probes between nodes send test traffic (rate-limited, one per pair): day-to-day work like "check now".
+	PathProbeProcedure:    levelWrite, // node names only, never addresses
+	NodeTraceProcedure:    levelWrite, // hops with their round trip, no router address
+	NodeDnsCheckProcedure: levelWrite, // resolver timings of the doctor's control domains
+	PathSpeedProcedure:    levelOwner, // moves up to 32 MB between two nodes: owner only, and for tokens only through an approved plan (policy_tokens.go)
 	adminv1connect.NodeServiceGetFleetConnectionsProcedure: levelRead,  // counts only, no address
+	adminv1connect.NodeServiceGetNetworksProcedure:         levelRead,  // ASNs and counts only, no address
 	adminv1connect.NodeServiceUpdateNodeProcedure:          levelWrite, // the handler refuses a helper that sets client_ipv6 (where people seem to come from) or moves the address: owner only
 	adminv1connect.NodeServiceSetNodeDecoyModeProcedure:    levelOwner,
 	adminv1connect.NodeServiceUploadNodeDecoyProcedure:     levelOwner,
@@ -133,6 +156,7 @@ var procedureLevels = map[string]level{
 	adminv1connect.HealthServiceGetChecksProcedure:    levelRead,
 	adminv1connect.HealthServiceGetDoctorProcedure:    levelRead,
 	adminv1connect.HealthServiceMuteAlertProcedure:    levelWrite,
+	adminv1connect.HealthServiceDismissAlertProcedure: levelWrite, // Close: like a mute, day-to-day work
 	adminv1connect.HealthServiceRunChecksNowProcedure: levelWrite,
 	adminv1connect.HealthServiceRunDoctorProcedure:    levelWrite,
 	adminv1connect.HealthServiceApplyFixProcedure:     levelOwner,
@@ -210,6 +234,8 @@ var procedureLevels = map[string]level{
 	adminv1connect.UpdateServiceScheduleNodeUpdateProcedure:       levelOwner, // also needs a step-up
 	adminv1connect.UpdateServiceCancelNodeUpdateScheduleProcedure: levelOwner, // also needs a step-up
 	adminv1connect.UpdateServiceSetUpdateTimezoneProcedure:        levelOwner, // also needs a step-up
+	adminv1connect.UpdateServiceSetUpdateChannelProcedure:         levelOwner, // also needs a step-up; never available to tokens
+	adminv1connect.UpdateServiceSetUpdateDownloadTimeoutProcedure: levelOwner, // also needs a step-up
 
 	// DeviceService: devices that hold their own keys. All of it is levelWrite, like the subscription link
 	// (it is a user credential), and every call that returns a private key writes an audit row in the handler;
@@ -252,6 +278,11 @@ var procedureLevels = map[string]level{
 	adminv1connect.BackupServiceTestBackupStorageProcedure:    levelOwner, // writes and deletes a probe object; also needs a step-up
 	adminv1connect.BackupServiceCreateBackupProcedure:         levelOwner, // exports sensitive installation state; also needs a step-up
 	adminv1connect.BackupServiceListBackupsProcedure:          levelOwner,
+	adminv1connect.BackupServicePrepareRestoreProcedure:       levelOwner,
+	adminv1connect.BackupServiceConfirmRestoreProcedure:       levelOwner, // also needs a step-up
+	adminv1connect.BackupServiceListKeptDataProcedure:         levelOwner,
+	adminv1connect.BackupServiceDeleteKeptDataProcedure:       levelOwner, // also needs a step-up
+	adminv1connect.BackupServiceGetRestoreResultProcedure:     levelOwner,
 
 	// TelegramService: setting the bot is the owner's (it decides where alerts go; also needs a step-up); linking, unlinking and
 	// switching alerts is each admin's own account, any role, like passkeys (linking also needs a step-up). Not open to tokens.
@@ -278,6 +309,27 @@ var procedureLevels = map[string]level{
 	adminv1connect.UserServiceIssueTelegramKeyProcedure:    levelWrite, // like the AmneziaVPN key calls: the key is a user credential
 	adminv1connect.UserServiceRotateTelegramKeyProcedure:   levelWrite,
 	adminv1connect.UserServiceRevokeTelegramKeyProcedure:   levelWrite,
+
+	// AssistantService is a signed-in UI surface only; token access is deliberately absent from policy_tokens.go.
+	adminv1connect.AssistantServiceGetAssistantAccessProcedure:      levelRead,
+	adminv1connect.AssistantServiceGetAssistantSettingsProcedure:    levelOwner,
+	adminv1connect.AssistantServiceUpdateAssistantSettingsProcedure: levelOwner,
+	adminv1connect.AssistantServiceSetProviderKeyProcedure:          levelOwner,
+	adminv1connect.AssistantServiceRemoveProviderKeyProcedure:       levelOwner,
+	adminv1connect.AssistantServiceListProviderModelsProcedure:      levelOwner,
+	adminv1connect.AssistantServiceListConversationsProcedure:       levelRead,
+	adminv1connect.AssistantServiceGetConversationProcedure:         levelRead,
+	adminv1connect.AssistantServiceDeleteConversationProcedure:      levelRead,
+	adminv1connect.AssistantServiceDeleteAllConversationsProcedure:  levelRead,
+	adminv1connect.AssistantServiceChatProcedure:                    levelRead,
+	adminv1connect.AssistantServiceStopTurnProcedure:                levelRead,
+	adminv1connect.AssistantServiceApplyPlanProcedure:               levelRead,
+	adminv1connect.AssistantServiceDismissPlanProcedure:             levelRead,
+	adminv1connect.AssistantServiceCancelFollowUpProcedure:          levelRead,
+	adminv1connect.AssistantServiceListMemoryProcedure:              levelRead,
+	adminv1connect.AssistantServiceSaveMemoryProcedure:              levelRead,
+	adminv1connect.AssistantServiceDeleteMemoryProcedure:            levelRead,
+	adminv1connect.AssistantServiceForgetAllProcedure:               levelRead,
 }
 
 // levelOf is the level a procedure path needs; unknown paths need the owner.

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useCallback, useMemo, useState } from "react";
 import { useAddNode } from "@/components/add-node";
 import { PageTitle } from "@/components/ui/bits";
 import { Icon } from "@/components/ui/icons";
@@ -25,9 +25,21 @@ import { nodesQuery } from "@/lib/queries";
 import { protocolName, protocolShort, sortProtocols } from "@/lib/series";
 import { meQuery } from "@/lib/session";
 import { useOlderNodes } from "@/lib/updates";
-import { DecoyBulk } from "./nodes-decoy";
+import { useIsPhone } from "@/lib/media";
+import { readPref, writePref } from "@/lib/storage";
+import { FleetMap } from "./nodes-map";
+import { FleetLoad } from "./nodes-load";
+import { useEdition } from "@/lib/edition";
+import { useBatch } from "@/lib/batch";
+import { PickMenu } from "@/components/bulk";
+import { NodesBulk } from "./nodes-bulk";
+import { Fresh } from "@/components/fx/fresh";
+import { useListEntrance } from "@/components/fx/page";
+import { passwordOnly, useBulkRun } from "./nodes-bulk-actions";
+import { PanelKeyOffer } from "./nodes-panel-key";
 
 type StatusFilter = "all" | "problems" | "working";
+type NodesView = "list" | "map" | "load";
 const all = "all";
 
 const onlineOf = (n: Node) => n.online.reduce((a, o) => a + o.users, 0);
@@ -37,12 +49,29 @@ export function NodesScreen() {
   const fmt = useFmt();
   const addNode = useAddNode();
   const q = useQuery(nodesQuery);
+  const entrance = useListEntrance(q.data !== undefined);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [protocol, setProtocol] = useState(all);
   const [country, setCountry] = useState(all);
-  // ticked nodes (owner only: the bulk decoy change is an owner call)
+  // ticked nodes and the bulk bar (owner only: SSH, rollouts and the decoy site are owner calls)
   const owner = useQuery(meQuery).data?.admin?.role === Role.OWNER;
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  const batch = useBatch();
+  const run = useBulkRun(batch, owner);
+  const older = useOlderNodes();
+  const clear = useCallback(() => setTicked(new Set()), []);
+  // List, the fleet map or the load: the URL's (?view=map, ?view=load), else the one this browser used last. A phone has no
+  // map; the Cloudflare edition has no load (OpsService is the VPS edition's).
+  const navigate = useNavigate();
+  const phone = useIsPhone();
+  const { edge } = useEdition();
+  const search = useSearch({ strict: false }) as { view?: NodesView; focus?: string };
+  const wanted = search.view ?? readPref("nodes.view");
+  const view: NodesView = wanted === "map" && !phone ? "map" : wanted === "load" && !edge ? "load" : "list";
+  const setView = (v: NodesView) => {
+    writePref("nodes.view", v);
+    void navigate({ to: "/nodes", search: v === "list" ? {} : { view: v }, replace: true });
+  };
 
   const nodes = useMemo(() => q.data?.nodes ?? [], [q.data]);
   const problems = nodes.filter(isProblem).length;
@@ -69,6 +98,15 @@ export function NodesScreen() {
   const allShown = shownIds.length > 0 && shownIds.every((id) => ticked.has(id));
   const toggleAll = () => setTicked(allShown ? new Set([...ticked].filter((id) => !shownIds.includes(id))) : new Set([...ticked, ...shownIds].slice(0, maxBulkNodes)));
   const select: Select | undefined = owner ? { ticked, toggle, toggleAll, allShown, someShown: shownIds.some((id) => ticked.has(id)), full: ticked.size >= maxBulkNodes, pickable } : undefined;
+  // every quick pick replaces the selection; "Password only" is the offer's own rule
+  const live = nodes.filter(pickable);
+  const picks = [
+    { label: "bulk.pick.shown", ids: shownIds },
+    { label: "bulk.pick.problems", ids: live.filter(isProblem).map((n) => n.id) },
+    { label: "bulk.pick.password", ids: live.filter((n) => passwordOnly(run.ctx.access?.get(n.id))).map((n) => n.id) },
+    { label: "bulk.pick.outdated", ids: live.filter((n) => older.has(n.id)).map((n) => n.id) },
+  ] as const;
+  const pick = (ids: readonly string[]) => setTicked(new Set(ids.slice(0, maxBulkNodes)));
 
   if (!q.data) {
     return (
@@ -111,6 +149,37 @@ export function NodesScreen() {
         </div>
       ) : (
         <>
+          {owner && (
+            <PanelKeyOffer
+              busy={batch.running}
+              onStart={(ids) => {
+                const set = new Set(ids.slice(0, maxBulkNodes));
+                setTicked(set);
+                void run.run("panelKey", nodes.filter((n) => set.has(n.id)));
+              }}
+            />
+          )}
+          {(!phone || !edge) && (
+            <div className="flex justify-end">
+              <Segmented
+                variant="flat"
+                aria-label={t("fm.view")}
+                value={view}
+                onValueChange={setView}
+                options={[
+                  { value: "list" as const, label: t("wg.view.list") },
+                  ...(phone ? [] : [{ value: "map" as const, label: t("fm.view.map") }]),
+                  ...(edge ? [] : [{ value: "load" as const, label: t("load.view") }]),
+                ]}
+              />
+            </div>
+          )}
+          {view === "map" ? (
+            <FleetMap nodes={nodes} owner={owner} focus={search.focus} />
+          ) : view === "load" ? (
+            <FleetLoad />
+          ) : (
+            <>
           <div className="flex flex-wrap items-center gap-2">
             <Segmented
               variant="flat"
@@ -123,6 +192,7 @@ export function NodesScreen() {
                 { value: "working", label: chip(t("nodes.working"), working) },
               ]}
             />
+            {owner && <PickMenu picks={picks.map((p) => ({ label: t(p.label), ids: p.ids }))} any={ticked.size > 0} onPick={pick} />}
             <span className="flex-1" />
             <div className="w-[150px]">
               <Select
@@ -144,10 +214,12 @@ export function NodesScreen() {
             </div>
           </div>
 
-          {picked.length > 0 && <DecoyBulk nodes={picked} onClear={() => setTicked(new Set())} />}
-          <Table rows={rows} fmt={fmt} select={select} />
-          <Cards rows={rows} fmt={fmt} select={select} />
+          <Table rows={rows} fmt={fmt} select={select} entrance={entrance} />
+          <Cards rows={rows} fmt={fmt} select={select} entrance={entrance} />
           {rows.length === 0 && <p className="p-8 text-center text-[13px] text-muted">{t("nodes.noRows")}</p>}
+          {owner && <NodesBulk nodes={nodes} picked={picked} shown={new Set(rows.map((n) => n.id))} batch={batch} run={run} onClear={clear} />}
+            </>
+          )}
         </>
       )}
     </div>
@@ -158,47 +230,55 @@ const cols = "md:grid-cols-[minmax(220px,2.4fr)_minmax(150px,1fr)_minmax(90px,0.
 const colsSelect = "md:grid-cols-[18px_minmax(220px,2.4fr)_minmax(150px,1fr)_minmax(90px,0.8fr)_56px_76px_92px_60px]";
 
 /** Ticking nodes for a bulk change (owner only): which are ticked, and how the page ticks them. */
+type Entrance = ReturnType<typeof useListEntrance>;
 type Select = {
   ticked: ReadonlySet<string>;
   toggle: (id: string) => void;
   toggleAll: () => void;
   allShown: boolean;
   someShown: boolean;
-  /** 50 are ticked: the rest cannot be (SetNodesDecoyMode takes at most 50). */
+  /** 50 are ticked: the rest cannot be (SetNodesDecoyMode takes at most 50; a batch of more would run for minutes). */
   full: boolean;
   pickable: (n: Node) => boolean;
 };
 
-/** One tick box: above the row's overlay link (z-10), so ticking does not open the node. */
+/**
+ * One tick box: above the row's overlay link (z-10), so ticking does not open the node. The label around it is the hit
+ * area, a padded square: the 16px box alone was easy to miss, and a miss opened the node.
+ */
 function Tick({ select, node, className }: { select: Select; node: Node; className?: string }) {
   const t = useT();
   const on = select.ticked.has(node.id);
   return (
-    <input
-      type="checkbox"
-      className={cx("relative z-10 size-4 flex-none accent-accent", className)}
-      aria-label={t("decoy.bulk.select", { name: node.name })}
-      checked={on}
-      disabled={!select.pickable(node) || (select.full && !on)}
-      onChange={() => select.toggle(node.id)}
-    />
+    <label className={cx("relative z-10 -m-2 grid flex-none cursor-pointer p-2", className)}>
+      <input
+        type="checkbox"
+        className="size-4 accent-accent"
+        aria-label={t("bulk.select", { name: node.name })}
+        checked={on}
+        disabled={!select.pickable(node) || (select.full && !on)}
+        onChange={() => select.toggle(node.id)}
+      />
+    </label>
   );
 }
 
 /**
- * The label under a node name; an outdated agent (the Updates module knows by build time, not by version text) turns
- * a healthy line amber and sends to the Updates screen, which says what to do.
+ * The line under a node's name. A table row has only the dot beside the name, so its line says the status too
+ * (`withWord`: the reason, else the word); a card has the word beside the name, so its line is the reason alone. An
+ * outdated agent (the Updates module knows by build time, not by version text) turns the line into an amber link to the
+ * Updates screen, which says what to do.
  */
 function useSub() {
   const t = useT();
   const st = useNodeStatus();
   const older = useOlderNodes();
-  return (n: Node): { text: string; cls: string; update: boolean } => {
+  return (n: Node, withWord: boolean): { text: string; cls: string; update: boolean } => {
     const kind = nodeKind(n);
     if (kind === "ok" && older.has(n.id)) {
-      return { text: `${t("nodes.agentOld")} ${n.agentVersion}`.trim(), cls: kindTextClass.warn, update: true };
+      return { text: `${t(withWord ? "nodes.agentOldLine" : "nodes.agentOld")} ${n.agentVersion}`.trim(), cls: kindTextClass.warn, update: true };
     }
-    return { text: st.line(n), cls: kindTextClass[kind], update: false };
+    return { text: withWord ? st.line(n) : st.reason(n.reason), cls: kindTextClass[kind], update: false };
   };
 }
 
@@ -217,7 +297,19 @@ function SubLine({ s, className }: { s: { text: string; cls: string; update: boo
   );
 }
 
-function Table({ rows, fmt, select }: { rows: Node[]; fmt: Fmt; select: Select | undefined }) {
+/** Keep the status dot and its word together, independently of the height of the notes below. */
+function NodeStatusLabel({ node }: { node: Node }) {
+  const st = useNodeStatus();
+  const kind = nodeKind(node);
+  return (
+    <span className={cx("inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold whitespace-nowrap", kindTextClass[kind])}>
+      <StatusDot kind={kind} />
+      {st.word(node)}
+    </span>
+  );
+}
+
+function Table({ rows, fmt, select, entrance }: { rows: Node[]; fmt: Fmt; select: Select | undefined; entrance: Entrance }) {
   const t = useT();
   const sub = useSub();
   const heads = [t("nodes.col.node"), t("nodes.col.address"), t("nodes.col.protocols"), t("nodes.col.online"), t("nodes.col.today"), t("nodes.col.cpu"), t("nodes.col.uptime")];
@@ -229,7 +321,7 @@ function Table({ rows, fmt, select }: { rows: Node[]; fmt: Fmt; select: Select |
           <input
             type="checkbox"
             className="size-4 accent-accent"
-            aria-label={t("decoy.bulk.selectAll")}
+            aria-label={t("bulk.selectAll")}
             checked={select.allShown}
             ref={(el) => {
               if (el) el.indeterminate = select.someShown && !select.allShown;
@@ -248,76 +340,78 @@ function Table({ rows, fmt, select }: { rows: Node[]; fmt: Fmt; select: Select |
           </span>
         ))}
       </div>
-      {rows.map((n) => {
+      {rows.map((n, i) => {
         const kind = nodeKind(n);
-        const s = sub(n);
+        const s = sub(n, true);
         return (
-          <div
+          <Fresh kind="node" id={n.id}
             key={n.id}
-            className={cx("relative grid min-h-[60px] items-center gap-4 border-b border-line px-5 py-2 text-[13px] transition-colors duration-200 last:border-b-0 hover:bg-surface-2", select ? colsSelect : cols)}
+            style={entrance(i)}
+            className={cx("relative grid min-h-[60px] items-start gap-4 border-b border-line px-5 py-2 text-[13px] transition-colors duration-200 last:border-b-0 hover:bg-surface-2", select ? colsSelect : cols)}
           >
             <Link to="/nodes/$id" params={{ id: n.id }} aria-label={n.name} className="absolute inset-0" />
-            {select && <Tick select={select} node={n} />}
-            <div className="flex min-w-0 items-center gap-3">
-              <StatusDot kind={kind} />
+            {/* -mt-1.5 instead of the hit area's -m-2 at the top: the 16px box centred on the name's 20px line */}
+            {select && <Tick select={select} node={n} className="-mt-1.5" />}
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-5 flex-none items-center">
+                <StatusDot kind={kind} />
+              </span>
               <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex items-baseline gap-2">
+                <span className="flex min-w-0 items-baseline gap-2">
                   <b className="text-sm">{n.name}</b>
-                  <span className="truncate text-xs text-muted">{[n.location || fmt.country(n.countryCode), n.provider].filter(Boolean).join(" · ")}</span>
+                  <span className="min-w-0 truncate text-xs text-muted">{[n.location || fmt.country(n.countryCode), n.provider].filter(Boolean).join(" · ")}</span>
                 </span>
                 <SubLine s={s} className="line-clamp-2 text-xs" />
+                <NodeNotes node={n} className="mt-1" />
               </div>
             </div>
-            <span title={n.address} className="font-mono text-xs break-all text-muted">
+            <span title={n.address} className="self-start pt-0.5 font-mono text-xs break-all text-muted">
               {n.address}
             </span>
-            <span title={n.protocols.map(protocolName).join(", ")} className="truncate font-mono text-xs text-muted">
+            <span title={n.protocols.map(protocolName).join(", ")} className="self-start pt-0.5 truncate font-mono text-xs text-muted">
               {n.protocols.map(protocolShort).join(", ") || "—"}
             </span>
-            <span className="text-end font-mono">{onlineOf(n)}</span>
-            <span className="text-end font-mono">{fmt.bytes(n.trafficTodayBytes)}</span>
-            <div className="flex items-center justify-end gap-2">
+            <span className="self-start pt-0.5 text-end font-mono">{onlineOf(n)}</span>
+            <span className="self-start pt-0.5 text-end font-mono">{fmt.bytes(n.trafficTodayBytes)}</span>
+            <div className="flex items-center justify-end gap-2 self-start pt-1">
               <span className="h-1 w-11 overflow-hidden rounded-[2px] bg-surface-2">
                 <span className="block h-full bg-accent" style={{ width: `${n.hasMetrics ? Math.min(100, n.cpuPct) : 0}%` }} />
               </span>
               <span className="w-8 text-end font-mono text-xs">{n.hasMetrics ? `${Math.round(n.cpuPct)}%` : "—"}</span>
             </div>
-            <span className="text-end font-mono text-xs text-muted">{n.uptimeS > 0 ? fmt.duration(n.uptimeS) : "—"}</span>
-          </div>
+            <span className="self-start pt-0.5 text-end font-mono text-xs text-muted">{n.uptimeS > 0 ? fmt.duration(n.uptimeS) : "—"}</span>
+          </Fresh>
         );
       })}
     </div>
   );
 }
 
-function Cards({ rows, fmt, select }: { rows: Node[]; fmt: Fmt; select: Select | undefined }) {
+function Cards({ rows, fmt, select, entrance }: { rows: Node[]; fmt: Fmt; select: Select | undefined; entrance: Entrance }) {
   const t = useT();
-  const st = useNodeStatus();
   const sub = useSub();
   return (
     <div className="flex flex-col gap-2 md:hidden">
       {rows.map((n, i) => {
-        const kind = nodeKind(n);
-        const s = sub(n);
-        const stat = (value: string, label: string, hint?: string) => (
+        const s = sub(n, false);
+        const stat =(value: string, label: string, hint?: string) => (
           <div className="flex min-w-0 flex-col gap-0.5" title={hint}>
             <span className="truncate font-mono text-[15px] font-bold">{value}</span>
             <span className="text-[11px] text-muted">{label}</span>
           </div>
         );
         return (
-          <div key={n.id} className="screen-enter relative flex flex-col gap-2.5 rounded-card border border-line bg-surface p-3.5" style={{ animationDelay: `${i * 45}ms` }}>
+          <Fresh key={n.id} kind="node" id={n.id} className="relative flex flex-col gap-2.5 rounded-card border border-line bg-surface p-3.5" style={entrance(i)}>
             <Link to="/nodes/$id" params={{ id: n.id }} aria-label={n.name} className="absolute inset-0 rounded-card" />
             <div className="flex items-center gap-2">
               {select && <Tick select={select} node={n} />}
               <span className="flex h-5 items-center rounded-md bg-surface-2 px-1.5 font-mono text-[10px] font-bold text-muted">{n.countryCode || "—"}</span>
               <b className="text-[15px]">{n.name}</b>
               <span className="min-w-0 flex-1 truncate text-xs text-muted">{[n.location || fmt.country(n.countryCode), n.provider].filter(Boolean).join(" · ")}</span>
-              <span className={cx("flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap", kindTextClass[kind])}>
-                <StatusDot kind={kind} />
-                {st.word(n)}
-              </span>
+              <NodeStatusLabel node={n} />
             </div>
+            {(n.reason?.code || s.update) && <SubLine s={s} className="line-clamp-2 text-xs" />}
+            <NodeNotes node={n} />
             <div className="grid grid-cols-4 gap-2">
               {stat(String(onlineOf(n)), t("nodes.online"))}
               {stat(fmt.bytes(n.trafficTodayBytes), t("nodes.today"), t("nodes.todayHint"))}
@@ -333,10 +427,22 @@ function Cards({ rows, fmt, select }: { rows: Node[]; fmt: Fmt; select: Select |
               <span className="flex-1" />
               <span className="min-w-0 text-end font-mono text-[11px] break-all text-muted">{n.address}</span>
             </div>
-            {(kind !== "ok" || s.update) && <SubLine s={s} className="text-xs text-pretty" />}
-          </div>
+          </Fresh>
         );
       })}
     </div>
+  );
+}
+
+function NodeNotes({ node, className }: { node: Node; className?: string }) {
+  const notes = node.notes?.trim();
+  if (!notes) return null;
+  // Above the row link: only the notes show this title, and clicking them still opens the node. The icon's own
+  // flex-none is replaced by a className, so shrink-0 keeps long notes from squeezing it to a dot.
+  return (
+    <Link to="/nodes/$id" params={{ id: node.id }} title={notes} tabIndex={-1} className={cx("relative z-10 flex w-fit min-w-0 max-w-full items-start gap-1.5 border-s-2 border-line ps-2 text-xs text-muted", className)}>
+      <Icon name="text" size={12} className="mt-0.5 shrink-0 text-faint" />
+      <p className="line-clamp-2 whitespace-pre-line break-words">{notes}</p>
+    </Link>
   );
 }

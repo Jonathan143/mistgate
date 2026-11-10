@@ -25,6 +25,7 @@ import { CodeBlock } from "@/screens/integrations/parts";
 import { Panel, SettingRow } from "@/screens/users/ui";
 import { AwgBackendCard } from "./awg-backend";
 import { BandwidthMeasure } from "./bandwidth-measure";
+import { DebugCaptureCard } from "./debug-capture";
 import { DecoyCard } from "./decoy";
 import { useNodeForm, useSaveNode } from "./node-form";
 import { useRelaysOf } from "./relays";
@@ -77,10 +78,11 @@ export function ServerTab({ data }: { data: Plain<GetNodeResponse> }) {
           <AgentPanel data={data} owner={owner} />
         </div>
         <div className="flex min-w-0 flex-col gap-3.5">
-          <SSHAccessCard nodeId={node.id} />
+          <SSHAccessCard nodeId={node.id} attach={retired ? undefined : { name: node.name, address: node.address }} />
           {!retired && <DecoyCard node={node} />}
           {!retired && <AwgBackendCard data={data} />}
           <HostPanel data={data} />
+          {!retired && <DebugCaptureCard node={node} />}
         </div>
       </div>
       {!retired && <RetireZone nodeId={node.id} name={node.name} onUnreached={() => setUnreached(true)} />}

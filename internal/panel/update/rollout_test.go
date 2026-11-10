@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +17,7 @@ import (
 
 	adminv1 "github.com/mistgate/mistgate/gen/mistgate/admin/v1"
 	agentv1 "github.com/mistgate/mistgate/gen/mistgate/agent/v1"
+	"github.com/mistgate/mistgate/internal/asndb"
 	"github.com/mistgate/mistgate/internal/panel/store"
 )
 
@@ -163,6 +166,63 @@ func TestTrustedGitHubBundleWaitsForExplicitNodeUpdate(t *testing.T) {
 		if step.NodeID == second {
 			t.Fatal("an unselected node was included in the rollout")
 		}
+	}
+}
+
+func TestRolloutStartDoesNotWaitForNetworkTableParse(t *testing.T) {
+	e := newEnv(t)
+	e.defaultBundle()
+	nodeID := e.addNode("node", nodeOpts{})
+	writeBundle(t, filepath.Join(e.dir, "dist"), e.priv, "1.0.0", newBuilt+5000, e.clk.Now().Add(time.Hour).Unix(), map[string][]byte{
+		"mistgate-node-linux-amd64": []byte("test binary"),
+		"mistgate-asndb-data-any":   networkTableFixture(t, 1_800_000_000, 64496, "DE", "de1"),
+	})
+	parsed := make(chan struct{})
+	parseDone := make(chan struct{})
+	releaseParse := make(chan struct{})
+	originalParse := e.s.parseNetworkTable
+	e.s.parseNetworkTable = func(reader io.Reader) (*asndb.DB, error) {
+		close(parsed)
+		<-releaseParse
+		table, err := originalParse(reader)
+		close(parseDone)
+		return table, err
+	}
+	defer func() {
+		select {
+		case <-releaseParse:
+		default:
+			close(releaseParse)
+		}
+	}()
+	done := make(chan struct{})
+	var rollout store.RolloutRow
+	var startErr error
+	go func() {
+		rollout, startErr = e.s.start(e.ctx, []string{nodeID}, 0)
+		close(done)
+	}()
+	select {
+	case <-parsed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rollout rescan did not start the ASN parser")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("rollout start waited for the blocked ASN table parser")
+	}
+	if startErr != nil || rollout.ID == "" {
+		t.Fatalf("start rollout = %+v, %v", rollout, startErr)
+	}
+	close(releaseParse)
+	select {
+	case <-parseDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background ASN table parser did not finish")
+	}
+	if table := e.s.NetworksTable(); table == nil || table.Built().Unix() != 1_800_000_000 {
+		t.Fatalf("background ASN table result = %+v", table)
 	}
 }
 
@@ -1119,6 +1179,39 @@ func TestUpdateTimeouts(t *testing.T) {
 	})
 }
 
+func TestUpdateTimeoutSnapshotSurvivesSettingChangeAndRestart(t *testing.T) {
+	e := newEnv(t)
+	e.defaultBundle()
+	nodeID := e.addNode("timeout_snapshot", nodeOpts{caps: []string{"doctor/1", capUpdate, updateTimeoutCapability, capGuard}})
+	if err := e.st.SetSettingIfChanged(e.ctx, updateDownloadTimeoutKey, "3600"); err != nil {
+		t.Fatal(err)
+	}
+	e.fl.onUpdate = func(string) (*agentv1.CommandResult, error) {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("the node link dropped"))
+	}
+	e.startRollout()
+	e.tick()
+	x := e.wantStep(nodeID, store.StepSent, "")
+	if x.AnswerWait != 61*time.Minute {
+		t.Fatalf("captured answer wait = %s, want 61m", x.AnswerWait)
+	}
+
+	if err := e.st.SetSettingIfChanged(e.ctx, updateDownloadTimeoutKey, "300"); err != nil {
+		t.Fatal(err)
+	}
+	e.clk.Advance(10 * time.Minute)
+	e.tick()
+	e.wantStep(nodeID, store.StepSent, "")
+
+	e.restart()
+	e.clk.Advance(50 * time.Minute)
+	e.tick()
+	e.wantStep(nodeID, store.StepSent, "")
+	e.clk.Advance(5*time.Minute + time.Second)
+	e.tick()
+	e.wantStep(nodeID, store.StepFailed, "no_answer")
+}
+
 func TestUpdateTimeoutDefersWhenNodeReadFailsOnce(t *testing.T) {
 	e := newEnv(t)
 	e.defaultBundle()
@@ -1333,14 +1426,18 @@ func TestRolloutSurvivesAPanelRestart(t *testing.T) {
 		e := newEnv(t)
 		e.defaultBundle()
 		a := e.addNode("a", nodeOpts{})
-		hold := make(chan struct{})
+		hold, onWire := make(chan struct{}), make(chan struct{})
 		e.fl.onUpdate = func(string) (*agentv1.CommandResult, error) {
+			close(onWire)
 			<-hold // the panel dies before the answer arrives
 			return nil, connect.NewError(connect.CodeUnavailable, errors.New("the node link dropped"))
 		}
 		e.startRollout()
 		e.s.tick(e.ctx)
 		e.wantStep(a, store.StepSent, "")
+		// The step is marked sent before the command goroutine reaches the node; the restart below is meant to come after the
+		// update is on the wire, so wait for that rather than race it.
+		<-onWire
 		old := e.s
 		e.restart()
 		e.upgrade(a) // it updated while the panel was down

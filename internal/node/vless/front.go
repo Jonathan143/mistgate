@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/mistgate/mistgate/internal/decoy"
 	"github.com/mistgate/mistgate/internal/node/certs"
 	"github.com/mistgate/mistgate/internal/node/engine"
+	"github.com/mistgate/mistgate/internal/node/nets"
 	"github.com/mistgate/mistgate/internal/plugin"
 )
 
@@ -114,6 +116,7 @@ type tlsFront struct {
 	unixAddr    string
 	cert        func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 	protos      []string
+	links       frontLinks
 
 	mu     sync.Mutex
 	conns  map[*tlsFrontConn]struct{}
@@ -121,9 +124,22 @@ type tlsFront struct {
 	wg     sync.WaitGroup
 }
 
+// frontLinks is what the front counts of its handshakes (links.go): into counters (nil: nothing), hellos for another name
+// than serverName, and the TCP stall of a connection that got through when stalls is set. A front knows no user key because
+// Xray authenticates it behind the Unix socket, so its connect rows have no person entry and fold into ASN 0 for k=3.
+type frontLinks struct {
+	counters      *inboundCounters
+	serverName    string
+	stalls        bool
+	nets          *nets.Aggregator
+	inboundID     string
+	countNetworks bool
+}
+
 type tlsFrontConn struct {
 	client   net.Conn
 	upstream net.Conn
+	asn      uint32
 }
 
 func tlsFrontProtos(transport string) []string {
@@ -135,7 +151,7 @@ func tlsFrontProtos(transport string) []string {
 
 // startTLSFront listens on the inbound port. protos is the ALPN list: WebSocket speaks HTTP/1.1 only, so h2 is not offered
 // to it (a client that insisted on h2 would reach a WebSocket server with h2 frames).
-func startTLSFront(id string, port uint16, cert func(*tls.ClientHelloInfo) (*tls.Certificate, error), protos []string, unixNetwork, unixAddr string) (*tlsFront, error) {
+func startTLSFront(id string, port uint16, cert func(*tls.ClientHelloInfo) (*tls.Certificate, error), protos []string, unixNetwork, unixAddr string, links frontLinks) (*tlsFront, error) {
 	host := ""
 	if BindIP != nil {
 		host = BindIP.String()
@@ -145,7 +161,7 @@ func startTLSFront(id string, port uint16, cert func(*tls.ClientHelloInfo) (*tls
 		return nil, fmt.Errorf("TLS front for %q: %w", id, err)
 	}
 	front := &tlsFront{
-		ln: ln, unixNetwork: unixNetwork, unixAddr: unixAddr, cert: cert, protos: protos,
+		ln: ln, unixNetwork: unixNetwork, unixAddr: unixAddr, cert: cert, protos: protos, links: links,
 		conns: make(map[*tlsFrontConn]struct{}),
 	}
 	front.wg.Add(1)
@@ -166,6 +182,10 @@ func (f *tlsFront) accept() {
 			continue
 		}
 		state := &tlsFrontConn{client: conn}
+		if f.links.countNetworks && f.links.nets != nil && f.links.nets.Enabled() {
+			state.asn = nets.LookupAddr(f.links.nets, conn.RemoteAddr())
+			f.links.nets.Add(f.links.inboundID, state.asn, nets.Attempt, "", "")
+		}
 		f.mu.Lock()
 		if f.closed {
 			f.mu.Unlock()
@@ -181,23 +201,60 @@ func (f *tlsFront) accept() {
 
 func (f *tlsFront) serve(state *tlsFrontConn) {
 	defer f.wg.Done()
+	through := false // the handshake completed and the bytes went on to Xray
 	defer func() {
 		f.mu.Lock()
 		delete(f.conns, state)
 		f.mu.Unlock()
+		if through && f.links.stalls {
+			stalled, first16K := tcpStall(state.client)
+			if f.links.counters != nil {
+				f.links.counters.stall(stalled, first16K)
+			}
+			if f.links.countNetworks && stalled && first16K && f.links.nets != nil {
+				f.links.nets.Add(f.links.inboundID, state.asn, nets.Broken, "", "")
+			}
+		}
 		_ = state.client.Close()
 		if state.upstream != nil {
 			_ = state.upstream.Close()
 		}
 	}()
 
+	hello := false
 	client := tls.Server(state.client, &tls.Config{
-		MinVersion:     tls.VersionTLS12,
-		GetCertificate: f.cert,
-		NextProtos:     f.protos,
+		MinVersion: tls.VersionTLS12,
+		GetCertificate: func(h *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			if !hello && f.links.counters != nil {
+				hello = true
+				f.links.counters.hellos.Add(1)
+				if want := strings.TrimSuffix(f.links.serverName, "."); want != "" && !strings.EqualFold(strings.TrimSuffix(h.ServerName, "."), want) {
+					f.links.counters.hellosForeign.Add(1)
+				}
+			}
+			return f.cert(h)
+		},
+		NextProtos: f.protos,
 	})
 	_ = state.client.SetDeadline(time.Now().Add(10 * time.Second))
 	if err := client.Handshake(); err != nil {
+		if c := f.links.counters; c != nil {
+			switch sent, recv, certificate := tlsHandshakeFailure(err); {
+			case sent:
+				c.tlsAlertsSent.Add(1)
+			case recv:
+				c.tlsAlertsRecv.Add(1)
+				if certificate {
+					c.tlsCertRefused.Add(1)
+				}
+			case hello:
+				// the node answered the hello; the client never finished (the deadline passed, or it went away)
+				c.hsUnfinished.Add(1)
+				if f.links.countNetworks && f.links.nets != nil {
+					f.links.nets.Add(f.links.inboundID, state.asn, nets.Unfinished, "", "")
+				}
+			}
+		}
 		return
 	}
 	_ = state.client.SetDeadline(time.Time{})
@@ -215,7 +272,13 @@ func (f *tlsFront) serve(state *tlsFrontConn) {
 		return
 	}
 	state.upstream = upstream
+	through = true
 	f.mu.Unlock()
+	// The front sees only an established TLS stream; its user credential is behind Xray and cannot be attached here.
+	// Take folds this unidentified connect into ASN 0 to preserve k=3.
+	if f.links.countNetworks && f.links.nets != nil {
+		f.links.nets.Add(f.links.inboundID, state.asn, nets.Connect, "", "")
+	}
 
 	finished := make(chan struct{}, 2)
 	go func() {

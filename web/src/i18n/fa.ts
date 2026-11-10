@@ -13,6 +13,7 @@ import { fa as telegramFa } from "./telegram";
 import { fa as portsFa } from "./ports";
 import { fa as editionFa } from "./edition";
 import { fa as decoyFa } from "./decoy";
+import { fa as bulkFa } from "./bulk";
 import { fa as countryFa } from "./country";
 import { fa as connectionsFa } from "./connections";
 import { fa as journalFa } from "./journal";
@@ -20,6 +21,15 @@ import { fa as relayFa } from "./relay";
 import { fa as waysFa } from "./ways";
 import { fa as tgproxyFa } from "./tgproxy";
 import { fa as protocolsFa } from "./protocols";
+import { fa as aiFa } from "./ai";
+import { fa as graphFa } from "./graph";
+import { fa as waysgraphFa } from "./waysgraph";
+import { fa as fleetmapFa } from "./fleetmap";
+import { fa as observabilityFa } from "./observability";
+import { fa as debugFa } from "./debug";
+import { fa as resourcesFa } from "./resources";
+import { fa as tasksFa } from "./tasks";
+import { fa as followupFa } from "./followup";
 
 // Persian (fa, right to left). Typed against the English shape: a missing or extra key fails `pnpm typecheck`.
 // The admin speaks to the owner as «تو» in standard written Persian (اگر می‌خواهی…، ایجنت را به‌روز کن); buttons and tabs
@@ -82,7 +92,7 @@ const core: CoreMessages = {
   "section.health.desc": "هشدارها، بررسی از دید کلاینت و عیب‌یاب همهٔ نودها.",
   "section.reachability.desc": "اینکه نودها از داخل یک کشور باز می‌شوند یا نه: منبع‌ها، نتیجهٔ هر نود و هفتهٔ آن.",
   "section.updates.desc": "نسخه‌های پنل و ایجنت نودها، انتشار مرحله‌ای و بازگردانی.",
-  "section.integrations.desc": "توکن‌های API برای اسکریپت‌ها، MCP برای ایجنت‌های هوش مصنوعی و تغییراتی که از تو می‌خواهند تأیید کنی.",
+  "section.integrations.desc": "هشدارهای تلگرام: هر مدیر گفتگوی خودش را وصل می‌کند.",
   "section.settings.desc": "مدیرها، امنیت، نسخه‌های پشتیبان و دامنه‌ها.",
   "section.empty": "فعلاً اینجا چیزی نیست",
   "header.search": "جستجوی نودها، کاربران و بخش‌ها",
@@ -152,6 +162,13 @@ const core: CoreMessages = {
   "settings.accent.rose": "گل‌رز",
   "settings.accent.sage": "مریم‌گلی",
   "settings.local": "این انتخاب‌ها فقط روی همین دستگاه نگه داشته می‌شوند.",
+  "settings.fx": "انیمیشن ظاهر شدن",
+  "settings.fx.beta": "بتا",
+  "settings.fx.show": "نمایش",
+  "settings.fx.create": "هنگام ساخته شدن چیزی",
+  "settings.fx.save": "هنگام ذخیره شدن چیزی یا پاسخ دستیار",
+  "settings.fx.pages": "هنگام باز شدن صفحه‌ها",
+  "settings.fx.hint": "گره، کاربر، گروه یا پروفایل تازه زیر موجی سبک از رنگ پدیدار می‌شود و حلقه‌ای نرم از نور از دکمه‌ای که زدید پخش می‌شود. اگر خاموش باشد یا سیستم شما کاهش حرکت را روشن کرده باشد، موارد تازه فقط ظاهر می‌شوند.",
   "settings.device": "فقط روی این دستگاه",
   "auth.setup.welcomeTitle": "سلام!",
   "auth.setup.welcomeBody": "این {brand} است، پنلی برای سرورهای VPN تو. اول زبان را انتخاب کن؛ بعداً می‌توانی عوضش کنی.",
@@ -271,4 +288,4 @@ const core: CoreMessages = {
   "field.reality.target_kind.invalid_enum": "سایت همین نود یا سایتی دیگر",
 };
 
-export const fa: Messages = { ...core, ...opsFa, ...usersFa, ...securityFa, ...profilesFa, ...subsFa, ...healthFa, ...updatesFa, ...awgFa, ...warpFa, ...integrationsFa, ...telegramFa, ...portsFa, ...editionFa, ...decoyFa, ...countryFa, ...connectionsFa, ...journalFa, ...relayFa, ...waysFa, ...tgproxyFa, ...protocolsFa };
+export const fa: Messages = { ...core, ...opsFa, ...usersFa, ...securityFa, ...profilesFa, ...subsFa, ...healthFa, ...updatesFa, ...awgFa, ...warpFa, ...integrationsFa, ...telegramFa, ...portsFa, ...editionFa, ...decoyFa, ...bulkFa, ...countryFa, ...connectionsFa, ...journalFa, ...relayFa, ...waysFa, ...tgproxyFa, ...protocolsFa, ...aiFa, ...graphFa, ...waysgraphFa, ...fleetmapFa, ...observabilityFa, ...debugFa, ...resourcesFa, ...tasksFa, ...followupFa };

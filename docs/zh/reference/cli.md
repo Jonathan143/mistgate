@@ -52,6 +52,8 @@ mistgate serve --listen :443 --acme-domain panel.example.com
 | `--decoy-dir` | `MISTGATE_DECOY_DIR` | the built-in page | 放置自有伪装站点的目录。其中的 `404.html` 和 `429.html` 会替换内置错误页面。 |
 | `--trusted-proxy` | `MISTGATE_TRUSTED_PROXY` (comma-separated) | none | 可信反向代理的 CIDR 或 IP；其 `X-Forwarded-For` 和 `Forwarded` 请求头会被采信。可重复指定。未设置时，TCP 对端就是客户端。 |
 | `--update-service` | `MISTGATE_UPDATE_SERVICE` | `mistgate.service` (none with `--dev`) | 面板自身的 systemd 单元；面板更新程序在替换二进制文件前后会停止并重新启动它。面板以 root 运行时使用此值；面板以其他用户身份运行时，会启动固定的 root 辅助单元，命令行中会指定该单元本身。 |
+| `--log-level` | `MISTGATE_LOG_LEVEL` | `info` | 启动时的面板日志级别：`debug`、`info`、`warn` 或 `error`。所有者可在面板运行时更改（设置 → 系统）；重启后恢复该值。 |
+| `--log-format` | `MISTGATE_LOG_FORMAT` | `text` | `text` 或 `json`：stderr 上日志的格式。 |
 | `--source-url` | `MISTGATE_SOURCE_URL` | `https://github.com/Mistgate/mistgate` | 此构建源代码的发布地址，会显示在管理后台版本旁（AGPL-3.0 第 13 节）。派生版本（fork）应指向自己的仓库；设为空可隐藏链接。 |
 | `--dev` | `MISTGATE_DEV` (`1`, `true`, `yes`, `on`) | off | 开发模式，见下文。 |
 
@@ -245,6 +247,7 @@ mistgate edge setup-link --file FILE
 | `run` | 在前台运行 Agent。 |
 | `cleanup-net` | 移除 Agent 的隧道接口、WARP 路由和 nftables 表。 |
 | `awg prepare-kernel` | 安装 AmneziaWG 内核模块。 |
+| `host enable-security-updates` | 开启自动安全更新（Debian 和 Ubuntu）。 |
 | `version` | 显示版本、构建时间和发布密钥指纹。 |
 
 `enroll` 和 `run` 都使用 `--state-dir`；两者必须指定同一目录。退出代码：成功为 0，错误为 1，用法错误为 2；节点尚未注册时 `run` 返回 78（此时 systemd 不会重启 Agent）。
@@ -309,7 +312,9 @@ next: mistgate-node install   (or, in the foreground: mistgate-node run)
 
 ### mistgate-node cleanup-net
 
-不接收参数。移除 Agent 的隧道接口、隧道 nftables 表，以及 WARP 设备、路由、规则和表（如果存在）。不需要状态目录或面板。服务单元每次停止后都会运行此命令；Agent 启动时会重新创建这些内容。
+移除 Agent 的隧道接口、隧道 nftables 表，以及 WARP 设备、路由、规则和表（如果存在）。不需要状态目录或面板。服务单元每次停止后都会运行此命令；Agent 启动时会重新创建这些内容。
+
+Agent 为 [IPv6 入口](../guide/nodes.md#ipv6-入口)保留的 IPv6 地址在停止、重启和更新后仍会保留。`--ipv6-addresses` 会一并移除它们，但只限 Agent 自己添加的地址（记录在状态目录的 `ipv6-owned.json` 中，`--state-dir`），绝不动主机自带的地址；用于手动清理服务器。
 
 ### mistgate-node awg prepare-kernel
 
@@ -328,6 +333,10 @@ mistgate-node awg prepare-kernel --yes    # 执行命令
 | `--timeout` | `45m` | 本次运行的最长时限。 |
 
 它会使用 apt 安装软件包（非交互式；如其他包管理器持有锁，最多等待 30 分钟）。支持 Debian 和 Ubuntu；不支持容器；必须关闭 Secure Boot 并使用 systemd。参见 [AmneziaWG](../guide/amneziawg.md)。
+
+### mistgate-node host enable-security-updates
+
+开启自动安全更新。仅限 Linux，以 root 身份运行。需要时安装 `unattended-upgrades`，并启用 APT 的周期性设置和 apt-daily 定时器；不会安装升级，也不会重启。不带 `--yes` 时只说明将做的更改。`--status-file` 把进度写入文件（诊断的修复**开启安全更新**运行此命令时，Agent 用它跟踪进度），`--timeout` 限制运行时间（默认 `20m`）。参见[修复](../operations/health.md#修复)。
 
 ### mistgate-node version
 

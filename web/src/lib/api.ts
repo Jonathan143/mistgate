@@ -15,6 +15,7 @@ import { GlobalpingService } from "@/gen/mistgate/admin/v1/globalping_pb";
 import { GroupService } from "@/gen/mistgate/admin/v1/group_pb";
 import { HealthService } from "@/gen/mistgate/admin/v1/health_pb";
 import { InstanceService } from "@/gen/mistgate/admin/v1/instance_pb";
+import { AssistantService } from "@/gen/mistgate/admin/v1/assistant_pb";
 import { ApiTokenService, ApprovalService } from "@/gen/mistgate/admin/v1/integrations_pb";
 import { NodeService } from "@/gen/mistgate/admin/v1/node_pb";
 import { ProfileService } from "@/gen/mistgate/admin/v1/profile_pb";
@@ -26,6 +27,8 @@ import { TspuProbeService } from "@/gen/mistgate/admin/v1/tspu_probe_pb";
 import { UpdateService } from "@/gen/mistgate/admin/v1/update_pb";
 import { UserService } from "@/gen/mistgate/admin/v1/user_pb";
 import { WarpService } from "@/gen/mistgate/admin/v1/warp_pb";
+import { OpsService } from "@/gen/mistgate/ops/v1/ops_pb";
+import { TasksService } from "@/gen/mistgate/tasks/v1/tasks_pb";
 import type { MessageKey } from "@/i18n/en";
 import { versionInterceptor } from "./stale";
 
@@ -57,6 +60,7 @@ export const awg = createClient(AwgService, transport);
 export const warp = createClient(WarpService, transport);
 export const apiTokens = createClient(ApiTokenService, transport);
 export const approvals = createClient(ApprovalService, transport);
+export const assistant = createClient(AssistantService, transport);
 export const telegram = createClient(TelegramService, transport);
 export const globalping = createClient(GlobalpingService, transport);
 export const countryReach = createClient(CountryReachabilityService, transport);
@@ -66,6 +70,10 @@ export const tspuProbe = createClient(TspuProbeService, transport);
 export const clientProbe = createClient(ClientProbeService, transport);
 export const cheburcheck = createClient(CheburcheckService, transport);
 export const bsbord = createClient(BsbordService, transport);
+// The panel's own logs, retention, export and metrics settings (the VPS edition; the edge answers UNIMPLEMENTED).
+export const ops = createClient(OpsService, transport);
+// The owner's scheduled tasks (the VPS edition; the edge answers UNIMPLEMENTED).
+export const tasks = createClient(TasksService, transport);
 // CheckRelay and switching a relay on wait for probes and for the entry to install the forward (up to ~40 s): no deadline here either.
 export const relays = createClient(RelayService, transport);
 

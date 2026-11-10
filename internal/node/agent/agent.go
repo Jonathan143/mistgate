@@ -41,9 +41,11 @@ import (
 	"github.com/mistgate/mistgate/internal/node/doctor"
 	"github.com/mistgate/mistgate/internal/node/engine"
 	"github.com/mistgate/mistgate/internal/node/hostctl"
+	"github.com/mistgate/mistgate/internal/node/nets"
 	"github.com/mistgate/mistgate/internal/node/ratelimit"
 	"github.com/mistgate/mistgate/internal/node/speedtest"
 	"github.com/mistgate/mistgate/internal/node/update"
+	"github.com/mistgate/mistgate/internal/sysstat"
 )
 
 // Config is what the caller (cmd/mistgate-node, or a test) provides.
@@ -62,6 +64,9 @@ type Config struct {
 	// Log receives the agent's records; every record also goes to the in-memory ring that LogRequest reads.
 	// Nil = slog.Default().
 	Log *slog.Logger
+	// Level is the LevelVar behind Log's handler. A debug capture raises it for its duration and puts it back; nil = the agent keeps
+	// a private one and the capture only gates what reaches its own buffer.
+	Level *slog.LevelVar
 
 	// Host-side services handed to the engines (engine.Env). Nil Certs means engines get no certificates,
 	// nil Egress means only a "no egress configured" error. Nil Masquerade uses the persisted node decoy site.
@@ -100,23 +105,31 @@ type Config struct {
 	// 10 s batches, and 32 MiB).
 	MaxPending      int
 	MaxPendingBytes int
+	kernelDebugOpts kernelDebugOptions // OS paths and the command runner are replaceable by package tests.
 }
 
 // Agent is the node agent. Build it with New and run it with Run.
 type Agent struct {
-	cfg       Config
-	startedAt time.Time
-	log       *slog.Logger
-	ring      *logRing
-	journal   *journal
-	host      hostctl.Host
-	meta      Meta
-	id        atomic.Pointer[identity]
-	decoySite *decoy.Site
+	cfg         Config
+	startedAt   time.Time
+	log         *slog.Logger
+	ring        *logRing
+	journal     *journal
+	debug       *debugState
+	kernelDebug *kernelDebugEnvironment
+	host        hostctl.Host
+	meta        Meta
+	id          atomic.Pointer[identity]
+	decoySite   *decoy.Site
 
-	engines   map[string]engine.Engine
-	protocols []string // sorted keys of engines
-	closeOnce sync.Once
+	engines            map[string]engine.Engine
+	protocols          []string // sorted keys of engines
+	closeOnce          sync.Once
+	nets               *nets.Aggregator
+	networkWake        chan struct{}
+	networkTarget      atomic.Pointer[networkTableTarget]
+	networkFetchMu     sync.Mutex
+	networkFetchCancel context.CancelFunc
 
 	torrentEventsMu sync.Mutex
 	torrentEvents   map[string]time.Time
@@ -156,15 +169,19 @@ type Agent struct {
 	udpSends      int
 	udpAfterFunc  func(time.Duration, func()) udpCountTimer
 	sendUDP       func(context.Context, string, []uint16, [8]byte, int, int, int) (string, int, error)
+	sendUDPDF     func(context.Context, string, []uint16, [8]byte, int, int, int, bool) (string, int, error) // test seam of a don't-fragment send
 	tcp           tcpProbeState
 	country       countryProbeState
+	pathTrace     pathTraceState
+	speed         speedState
 	linkCounterMu sync.Mutex
 	linkVolumes   map[linkCounterKey]linkCounterVolume
 	linkWindow    time.Duration // test seam; zero selects the production ten-minute window
 
 	doc       *doctor.Doctor
 	doctorRun func(context.Context, string, ...string) ([]byte, error)
-	hostRing  doctor.Ring                          // host samples for the doctor's cpu_softirq and idle-load rules
+	hostRing  doctor.Ring                          // host samples for the doctor's cpu_softirq, cpu_steal and idle-load rules
+	self      sysstat.ProcSampler                  // the agent process's own CPU and memory, for HostMetrics.agent
 	certNA    atomic.Pointer[map[string]time.Time] // certificate expiry per inbound at the last apply
 
 	mu           sync.Mutex
@@ -182,7 +199,9 @@ type Agent struct {
 	// brought back by this process starting (the reason of engine_started). upMarker is the update marker of a new build.
 	warm     bool
 	upMarker *update.Marker
-	hopRej   map[string]string // inbound id -> why its hop range was refused (F12), rebuilt by every syncHops
+	// exitProbe reads how the previous run ended from systemd and the journals (nil = the real host; tests replace it).
+	exitProbe exitProbe
+	hopRej    map[string]string // inbound id -> why its hop range was refused (F12), rebuilt by every syncHops
 
 	// L3 (l3.go): inbounds that may not run in this reconcile (id -> why), the failures already reported (one event per
 	// distinct message), and whether the tunnel table and the WARP subnet rules were ever installed (their removal is sent once).
@@ -216,6 +235,7 @@ type Agent struct {
 
 	linkPingEvery   time.Duration // 0 = NodeSettings.keepalive_interval_s (20 s): how often the link is pinged
 	linkPingTimeout time.Duration // 0 = NodeSettings.keepalive_timeout_s (45 s): how long a pong may take
+	updateLinkIdle  time.Duration // test seam; 0 = the updater's common no-data timeout
 
 	busy atomic.Int32 // operations started by a session that ending it would cut short (goBusy)
 
@@ -361,10 +381,13 @@ func New(cfg Config, engines map[string]engine.Factory, host hostctl.Host) (*Age
 	}
 	ring := newLogRing()
 	journal := newJournal()
+	dbg := newDebugState(cfg.Level, time.Now)
 	a := &Agent{
-		cfg: cfg, startedAt: time.Now(), ring: ring, journal: journal, host: host, meta: id.meta,
+		cfg: cfg, startedAt: time.Now(), ring: ring, journal: journal, debug: dbg, host: host, meta: id.meta,
 		decoySite:     site,
-		log:           slog.New(&ringHandler{ring: ring, journal: journal, inner: inner}),
+		nets:          nets.New(0),
+		networkWake:   make(chan struct{}, 1),
+		log:           slog.New(&ringHandler{ring: ring, journal: journal, dbg: dbg, inner: inner}),
 		engines:       map[string]engine.Engine{},
 		torrentEvents: map[string]time.Time{},
 		torrentUTPSyn: map[string]*torrentUTPSynWindow{},
@@ -396,6 +419,7 @@ func New(cfg Config, engines map[string]engine.Factory, host hostctl.Host) (*Age
 			DNS:        a.DNS,
 			Masquerade: a.masquerade,
 			Now:        a.now,
+			Nets:       a.nets,
 		})
 		if err != nil {
 			a.closeEngines()
@@ -409,6 +433,8 @@ func New(cfg Config, engines map[string]engine.Factory, host hostctl.Host) (*Age
 		a.protocols = append(a.protocols, proto)
 	}
 	sort.Strings(a.protocols)
+	a.kernelDebug = newKernelDebugEnvironment(cfg.kernelDebugOpts)
+	a.resetKernelDebugAtStart()
 	doctorEnv := a.doctorEnv()
 	a.doc = doctor.New(doctorEnv)
 	a.doctorRun = doctorEnv.Run
@@ -468,6 +494,7 @@ func (a *Agent) knows(protocol string) bool { _, ok := a.engines[protocol]; retu
 
 func (a *Agent) closeEngines() {
 	a.closeOnce.Do(func() {
+		a.debug.shutdown()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for _, p := range a.protocols {
@@ -486,6 +513,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.cancel = cancel
 	a.runCtx = ctx
 	defer cancel(nil)
+	defer a.debug.shutdown() // the capture lives in this process only: the level goes back to what it was
 
 	if a.startUpdate(ctx) { // a rollback decided at start replaces this process before anything runs
 		return context.Cause(ctx)
@@ -503,7 +531,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.warm = true
 
 	var wg sync.WaitGroup
-	loops := []func(context.Context){a.worker, a.collectLoop, a.renewLoop, a.sweepLoop}
+	loops := []func(context.Context){a.worker, a.collectLoop, a.renewLoop, a.sweepLoop, a.networkTableLoop}
 	if a.cfg.Warp != nil {
 		loops = append(loops, a.cfg.Warp.Run)
 	}
@@ -519,6 +547,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	cancel(cause)
 	wg.Wait()
 	a.closeEngines()
+	a.markCleanExit() // a crash or a kill never gets here: the next start reads the missing marker as an unclean end
 	if errors.Is(cause, ErrRetired) {
 		return ErrRetired
 	}
@@ -541,6 +570,7 @@ func (a *Agent) restore(ctx context.Context) {
 	}
 	if m.settings != nil {
 		a.settings.Store(m.settings)
+		a.configureNetworks(m.settings)
 	}
 	a.syncOwnedIPv6(ctx) // the addresses come back with the agent, without the panel
 	results := a.reconcile(ctx, m, nil)
@@ -952,6 +982,7 @@ func (a *Agent) runSession(cancel context.CancelFunc, stream agentTransport) err
 	}
 	a.cur.Store(s)
 	defer a.cur.CompareAndSwap(s, nil)
+	a.goBusy(func() { a.debugResume(s) }) // a capture that ended while the link was down
 	if a.clientIPv6DoctorPending.Load() {
 		a.submit(s, job{sweep: true}) // apply HelloAck settings before their doctor re-check
 	}
@@ -997,6 +1028,7 @@ func (a *Agent) hello(ctx context.Context) *pb.ConnectRequest {
 		NodeId: a.meta.NodeID, AgentVersion: a.cfg.Version, ApiVersion: apiVersion, InstanceId: a.instanceID,
 		NextSeq: next, FirstUnackedSeq: first, AppliedRevision: rev, AppliedStateHash: hash,
 		Capabilities: a.capabilities(), Built: a.cfg.Built,
+		NetworksDbSha256: a.nets.LoadedSHA(),
 	}
 	h.DecoyMode, h.DecoySha256 = a.decoySite.State()
 	if o := a.upd.Outcome(); o != nil {
@@ -1035,6 +1067,7 @@ func (a *Agent) onHelloAck(ack *pb.HelloAck) {
 		changed := ack.Settings.GetClientIpv6Disabled() != a.settings.Load().GetClientIpv6Disabled() ||
 			ipv6AddrSettingsChanged(a.settings.Load(), ack.Settings) // the sweep that follows the connect puts the addresses right
 		a.settings.Store(ack.Settings)
+		a.configureNetworks(ack.Settings)
 		if changed {
 			a.clientIPv6DoctorPending.Store(true)
 		}
@@ -1082,6 +1115,10 @@ func (a *Agent) dispatch(s *session, msg *pb.ConnectResponse) {
 		a.goBusy(func() { a.httpMark(s, m.HttpMark) })
 	case *pb.ConnectResponse_TcpProbe:
 		a.goBusy(func() { a.tcpProbe(s, m.TcpProbe) })
+	case *pb.ConnectResponse_SpeedTest:
+		a.goBusy(func() { a.speedTest(s, m.SpeedTest) })
+	case *pb.ConnectResponse_PathTrace:
+		a.goBusy(func() { a.runPathTrace(s, m.PathTrace) })
 	case *pb.ConnectResponse_CountryProbe:
 		a.goBusy(func() { a.countryProbe(s, m.CountryProbe) })
 	case *pb.ConnectResponse_SetDecoy:
@@ -1090,6 +1127,10 @@ func (a *Agent) dispatch(s *session, msg *pb.ConnectResponse) {
 		a.goBusy(func() { a.applyUpdate(s, m.UpdateAgent) })
 	case *pb.ConnectResponse_RollbackAgent:
 		a.goBusy(func() { a.rollbackUpdate(s, m.RollbackAgent) })
+	case *pb.ConnectResponse_DebugCapture:
+		a.goBusy(func() { a.debugCapture(s, m.DebugCapture) })
+	case *pb.ConnectResponse_DebugCaptureAck:
+		a.debug.acknowledge(m.DebugCaptureAck.GetCaptureId(), m.DebugCaptureAck.GetChunkSeq())
 	case *pb.ConnectResponse_LogRequest:
 		s.startLog(m.LogRequest)
 	case *pb.ConnectResponse_LogCancel:

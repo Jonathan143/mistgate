@@ -351,6 +351,7 @@ func TestBearerAllowListAndProfiles(t *testing.T) {
 		{adminv1connect.FleetServiceOverviewProcedure, 200, 200, 200}, // a read on the list
 		{pCreateUser, 403, 200, 200},                                  // a write: operator and up
 		{adminv1connect.HealthServiceMuteAlertProcedure, 403, 200, 200},
+		{adminv1connect.HealthServiceDismissAlertProcedure, 403, 200, 200},
 		{pListAudit, 403, 403, 200}, // owner level on the list: the admin profile only
 		// closed to every profile, whatever the level
 		{pDeleteUsers, 403, 403, 403},
@@ -914,8 +915,8 @@ func TestTokenAllowList(t *testing.T) {
 			approved[path] = true
 		}
 	}
-	if len(approved) != 26 {
-		t.Errorf("%d procedures need approval, want 26: %v", len(approved), approved)
+	if len(approved) != 37 {
+		t.Errorf("%d procedures need approval, want 37: %v", len(approved), approved)
 	}
 	if got, ok := TokenAccess(adminv1connect.WarpServiceRegisterWarpProcedure); !ok || got != TokenAccessApproved {
 		t.Errorf("RegisterWarp token access = %d, %v; want approved", got, ok)
@@ -945,6 +946,17 @@ func TestTokenAllowList(t *testing.T) {
 		adminv1connect.RelayServiceDeleteRelayProcedure,
 	}
 	wantProfileGrants["node_ipv6"] = []string{adminv1connect.NodeServiceUpdateIpv6EntryProcedure}
+	wantProfileGrants["path_speed"] = []string{PathSpeedProcedure}
+	wantProfileGrants["node_update"] = []string{adminv1connect.NodeServiceUpdateNodeProcedure, adminv1connect.ProfileServiceUpdateInboundProcedure}
+	wantProfileGrants["group_update"] = []string{adminv1connect.GroupServiceUpdateGroupProcedure}
+	wantProfileGrants["subscription_rules_set"] = []string{adminv1connect.SubscriptionServiceUpdateSubscriptionSettingsProcedure}
+	wantProfileGrants["subscription_texts_set"] = []string{adminv1connect.SubscriptionServiceUpdateSubscriptionSettingsProcedure}
+	wantProfileGrants["subscription_link_limits_set"] = []string{adminv1connect.SubscriptionServiceUpdateSubscriptionSettingsProcedure}
+	wantProfileGrants["subscription_page_set"] = []string{adminv1connect.SubscriptionServiceUpdateSubscriptionSettingsProcedure}
+	wantProfileGrants["dns_settings_set"] = []string{adminv1connect.SubscriptionServiceUpdateSubscriptionSettingsProcedure}
+	wantProfileGrants["dns_preset_create"] = []string{adminv1connect.DnsServiceCreateDnsPresetProcedure}
+	wantProfileGrants["dns_preset_update"] = []string{adminv1connect.DnsServiceUpdateDnsPresetProcedure}
+	wantProfileGrants["dns_preset_delete"] = []string{adminv1connect.DnsServiceDeleteDnsPresetProcedure}
 	for tool, want := range wantProfileGrants {
 		if got := grantProcedures[tool]; !slices.Equal(got, want) {
 			t.Errorf("%s grant procedures = %v, want %v", tool, got, want)
@@ -977,14 +989,10 @@ func TestTokenAllowList(t *testing.T) {
 		adminv1connect.NodeServiceCreateEnrollmentProcedure,
 		adminv1connect.NodeServiceRetireNodeProcedure,
 		adminv1connect.NodeServiceStreamLogsProcedure,
-		adminv1connect.NodeServiceUpdateNodeProcedure,
 		adminv1connect.NodeServiceRestartInboundsProcedure,
 		adminv1connect.NodeServicePrepareAwgKernelProcedure, // installs packages on the node: never through a token or MCP
 		adminv1connect.NodeServiceMeasureBandwidthProcedure, // makes the node push up to 1 GB: owner only, never through a token or MCP
-		adminv1connect.ProfileServiceUpdateInboundProcedure,
 		adminv1connect.ProfileServiceTwinProfileProcedure,
-		adminv1connect.GroupServiceCreateGroupProcedure,
-		adminv1connect.GroupServiceDeleteGroupProcedure,
 		adminv1connect.UpdateServiceRescanBundleProcedure,
 		adminv1connect.InstanceServiceGetInstanceProcedure,
 		adminv1connect.InstanceServiceUpdateInstanceProcedure,
@@ -1011,9 +1019,17 @@ func TestTokenAllowList(t *testing.T) {
 		}
 	}
 	for path := range tokenProcedures {
-		for _, svc := range []string{"DeviceService", "DnsService", "InstanceService", "ApiTokenService", "ApprovalService", "AwgService"} {
+		for _, svc := range []string{"DeviceService", "InstanceService", "ApiTokenService", "ApprovalService", "AwgService"} {
 			if strings.Contains(path, "."+svc+"/") {
 				t.Errorf("%s: %s is closed to tokens as a whole", path, svc)
+			}
+		}
+		if strings.Contains(path, ".DnsService/") {
+			switch path {
+			case adminv1connect.DnsServiceListDnsPresetsProcedure, adminv1connect.DnsServiceCreateDnsPresetProcedure,
+				adminv1connect.DnsServiceUpdateDnsPresetProcedure, adminv1connect.DnsServiceDeleteDnsPresetProcedure:
+			default:
+				t.Errorf("%s: DNS is open only for DNS preset tools", path)
 			}
 		}
 		if strings.Contains(path, ".WarpService/") {
@@ -1037,8 +1053,8 @@ func TestTokenAllowList(t *testing.T) {
 	}
 	// Step-up procedures include the protected handlers, credential reveal/rotation, password changes,
 	// authenticator enrollment, login captcha, and sensitive infrastructure operations.
-	if len(stepUpProcedures) != 49 {
-		t.Errorf("%d step-up procedures, want 49", len(stepUpProcedures))
+	if len(stepUpProcedures) != 61 {
+		t.Errorf("%d step-up procedures, want 61", len(stepUpProcedures))
 	}
 }
 

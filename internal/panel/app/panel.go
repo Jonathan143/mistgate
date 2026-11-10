@@ -104,6 +104,20 @@ type BackgroundJob struct {
 	Run  func(context.Context)
 }
 
+type assistantRetention interface {
+	Retention(context.Context, time.Time) error
+}
+
+type assistantRPC interface {
+	Handler(opts ...connect.HandlerOption) (string, http.Handler)
+}
+
+// scheduledTasks is the TasksService with its scheduler (internal/panel/tasks, the VPS edition).
+type scheduledTasks interface {
+	Handler(opts ...connect.HandlerOption) (string, http.Handler)
+	Run(context.Context)
+}
+
 // Config contains the edition-specific dependencies and settings for the shared panel.
 type Config struct {
 	Store              *store.Store
@@ -140,6 +154,8 @@ type Config struct {
 	NodeBinaries nodeprovision.BinarySource
 	// OnAlertTransition, when set, sees every alert the health module opens or resolves, besides the Telegram announcement.
 	OnAlertTransition func(health.Transition)
+	// Ops is the VPS process's log ring and level (see OpsConfig); nil on the edge and in most tests.
+	Ops *OpsConfig
 }
 
 // Panel is the assembled panel: its public HTTP handler, VPS listener adapter and services.
@@ -179,6 +195,8 @@ type jobServices struct {
 	update      *update.Service
 	backup      *backup.Service
 	telegram    *telegram.Service
+	assistant   assistantRetention
+	tasks       scheduledTasks
 	provision   *nodeprovision.Service
 	store       *store.Store
 	log         *slog.Logger

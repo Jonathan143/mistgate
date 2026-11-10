@@ -20,11 +20,15 @@ import (
 
 // ---------------------------------------------------------------------------------------------------
 // resolver: the resolver does not resolve the control domains; a RU node must ask Yandex DNS or
-// gosuslugi.ru dies. Fix: set_resolver, only when the recommended resolvers answered in this very run.
+// gosuslugi.ru dies, and AliDNS and DNSPod resolve www.baidu.com for a CN node. Fix: set_resolver,
+// only when the recommended resolvers answered in this very run.
 
 var controlDomains = []string{"www.cloudflare.com", "www.gstatic.com", "www.google.com"}
 
-const ruDomain = "gosuslugi.ru"
+var countryDomains = map[string]string{
+	"RU": "gosuslugi.ru",
+	"CN": "www.baidu.com",
+}
 
 // ResolverTargets is what set_resolver configures: the usable (IP, optionally host:port) entries of
 // NodeSettings.dns_resolvers, else the default for the country.
@@ -55,10 +59,10 @@ func dialAddr(s string) (string, bool) {
 
 func checkResolver(ctx context.Context, e *Env) Result {
 	st := e.Settings()
-	ru := strings.EqualFold(st.Country, "RU")
+	domesticDomain := countryDomains[strings.ToUpper(st.Country)]
 	domains := append([]string(nil), controlDomains...)
-	if ru {
-		domains = append(domains, ruDomain)
+	if domesticDomain != "" {
+		domains = append(domains, domesticDomain)
 	}
 	type probe struct {
 		err error
@@ -102,12 +106,12 @@ func checkResolver(ctx context.Context, e *Env) Result {
 
 	var failed []string
 	var lat []time.Duration
-	ruFailed := false
+	domesticFailed := false
 	for i, r := range res {
 		if r.err != nil {
 			failed = append(failed, domains[i])
-			if domains[i] == ruDomain {
-				ruFailed = true
+			if domains[i] == domesticDomain {
+				domesticFailed = true
 			}
 		} else {
 			lat = append(lat, r.d)
@@ -119,9 +123,10 @@ func checkResolver(ctx context.Context, e *Env) Result {
 		median = lat[len(lat)/2]
 	}
 	r := Result{Status: OK, Code: CodeResolverOK, Params: p("failed", csv(failed), "median_ms", strconv.Itoa(int(median.Milliseconds())), "resolver", recommended,
-		"domains", strconv.Itoa(len(domains)), "failed_count", strconv.Itoa(len(failed)))}
+		"domains", strconv.Itoa(len(domains)), "failed_count", strconv.Itoa(len(failed)),
+		"p50_ms", strconv.Itoa(int(median.Milliseconds())), "p95_ms", strconv.Itoa(int(percentile(lat, 95).Milliseconds())))}
 	switch {
-	case ruFailed || len(failed) >= 2:
+	case domesticFailed || len(failed) >= 2:
 		r.Status = Fail
 	case len(failed) == 1 || median > resolverSlow:
 		r.Status = Warn
@@ -136,6 +141,15 @@ func checkResolver(ctx context.Context, e *Env) Result {
 		r.FixID = FixSetResolver
 	}
 	return r
+}
+
+// percentile is the nearest-rank percentile of lat, which is sorted; 0 for no samples.
+func percentile(lat []time.Duration, pct int) time.Duration {
+	if len(lat) == 0 {
+		return 0
+	}
+	rank := (len(lat)*pct + 99) / 100
+	return lat[max(rank, 1)-1]
 }
 
 // timedLookup resolves one name through the host resolver: 3 s, one retry. The duration is that of the
@@ -1045,14 +1059,6 @@ func parseConntrackDrops(content string) (uint64, bool) {
 	return 0, false
 }
 
-func conntrackAtCapacity(count, max uint64) bool {
-	if max == 0 {
-		return false
-	}
-	threshold := max/5*4 + (max%5*4+4)/5 // ceil(80% of max), without overflowing uint64.
-	return count >= threshold
-}
-
 // addConntrackParams reports the table's fill whenever it was read. The drops come from /proc/net/stat/nf_conntrack,
 // which kernels built without CONFIG_NF_CONNTRACK_PROCFS (Ubuntu's) do not have: then there is no drops param.
 func addConntrackParams(params map[string]string, snapshot conntrackSnapshot, dropsOK bool) map[string]string {
@@ -1075,11 +1081,12 @@ func containsField(s, want string) bool {
 	return false
 }
 
+// checkNetBaseline compares the settings with the baseline. The connection-tracking table's fill is reported in its params
+// (the table's size is part of the baseline), but a full table is conntrack_fill's verdict, not a baseline difference.
 func checkNetBaseline(_ context.Context, e *Env) Result {
 	diff, fixable, notes := baselineDiff(e)
 	conntrack, hasConntrack := readConntrackSnapshot(e)
-	underPressure := conntrack.hasCountAndMax && conntrackAtCapacity(conntrack.count, conntrack.max)
-	if len(diff) == 0 && !underPressure {
+	if len(diff) == 0 {
 		if len(notes) > 0 {
 			params := addConntrackParams(addUDPBufferErrorParams(p("notes", strings.Join(notes, ",")), e), conntrack, hasConntrack)
 			return Result{Status: OK, Code: CodeBaselineNotes, Params: params, Detail: noteText(notes)}
@@ -1087,21 +1094,8 @@ func checkNetBaseline(_ context.Context, e *Env) Result {
 		params := addConntrackParams(addUDPBufferErrorParams(p(), e), conntrack, hasConntrack)
 		return Result{Status: OK, Code: CodeBaselineOK, Params: params, Detail: "fq, bbr, conntrack, UDP buffers and the journald cap are in place"}
 	}
-	reportedDiff := append([]string(nil), diff...)
-	if underPressure {
-		reportedDiff = append(reportedDiff, "conntrack_pressure")
-	}
-	params := addConntrackParams(addUDPBufferErrorParams(p("differs", strings.Join(reportedDiff, ","), "notes", strings.Join(notes, ",")), e), conntrack, hasConntrack)
-	r := Result{Status: Warn, Code: CodeBaselineDiff, Params: params}
-	if len(diff) > 0 {
-		r.Detail = "baseline differs: " + strings.Join(diff, ", ")
-	}
-	if underPressure {
-		if r.Detail != "" {
-			r.Detail += "; "
-		}
-		r.Detail += fmt.Sprintf("conntrack table is at least 80%% full (%d/%d entries)", conntrack.count, conntrack.max)
-	}
+	params := addConntrackParams(addUDPBufferErrorParams(p("differs", strings.Join(diff, ","), "notes", strings.Join(notes, ",")), e), conntrack, hasConntrack)
+	r := Result{Status: Warn, Code: CodeBaselineDiff, Params: params, Detail: "baseline differs: " + strings.Join(diff, ", ")}
 	if len(notes) > 0 {
 		if r.Detail != "" {
 			r.Detail += "; "

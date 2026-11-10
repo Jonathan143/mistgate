@@ -43,7 +43,7 @@ func (s nodeService) GetNodeJournal(ctx context.Context, req *connect.Request[ad
 		inScope = nodes
 	}
 	for _, n := range inScope {
-		if !capabilityPresent(n.AgentCaps, capJournal) {
+		if !store.CapabilityPresent(n.AgentCaps, capJournal) {
 			resp.NodesWithoutJournal = append(resp.NodesWithoutJournal, n.ID)
 		}
 	}
@@ -58,7 +58,7 @@ func (s nodeService) GetNodeJournal(ctx context.Context, req *connect.Request[ad
 	}
 	rows, err := f.st.NodeJournal(ctx, store.NodeJournalFilter{
 		NodeID: req.Msg.NodeId, Since: since, Until: now, MinLevel: minLevel, Source: req.Msg.Source,
-		InboundID: req.Msg.InboundId, Query: logscrub.ClipRunes(req.Msg.Query, 100), Limit: limit + 1,
+		InboundID: req.Msg.InboundId, Query: logscrub.ClipRunes(req.Msg.Query, 100), Code: logscrub.ClipRunes(req.Msg.Code, 64), Limit: limit + 1,
 	})
 	if err != nil {
 		return nil, internalErr(f.log.Error, "read node journal", err)

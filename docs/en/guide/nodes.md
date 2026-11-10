@@ -17,7 +17,7 @@ Above the table:
 
 | Column | What it shows |
 |:--|:--|
-| **Node** | The status dot, the name, the location (or country) and the provider. Under it, the reason of the status, or the status word. |
+| **Node** | The status dot, the name, the location (or country) and the provider. Under it, the reason of the status, or the status word, and the first two lines of the node's notes (the full text on hover). |
 | **Address** | The domain or IP clients connect to. |
 | **Protocols** | The protocols of the profiles on the node. |
 | **Online** | People connected now. |
@@ -27,7 +27,48 @@ Above the table:
 
 On a phone the table becomes one card per node with the same facts. The list refreshes every 10 seconds. Retired nodes are not listed.
 
+**List**, **Map** and **Load** above the table switch the view, and the browser remembers the last one. A phone has no map; the Cloudflare edition has no load (see [Load](#load)).
+
 A healthy node whose agent is older than the version this panel ships reads **Healthy · outdated agent** with its version; the line is a link to **Updates**. See [Updates](../operations/updates.md).
+
+## Bulk actions
+
+The owner can tick nodes in the list (on a phone, on each card) and act on all of them at once. The box in the table's header ticks every shown node; **Select ▾** next to the status chips replaces the selection with **All shown**, **With problems**, **Password only** or **Outdated agent**, or clears it. At most 50 nodes are selected at once, and a retired node cannot be.
+
+While nodes are selected, a bar floats at the foot of the page (on a phone it takes the place of the menu dock): how many are selected and how many of them the filter hides, then the actions. **Esc** clears the selection.
+
+| Action | Where | What it does |
+|:--|:--|:--|
+| **Ports** | **Check ▾** | Runs the port check on each node, one node at a time (a check takes about 10 seconds). Starts at once. |
+| **Doctor** | **Check ▾** | Asks each node for a fresh doctor report, four at a time. Starts at once. |
+| **Update agent** | the bar | Opens the rollout window of **Updates** with the selected nodes whose agent is outdated; the rollout then runs on **Updates**. Off while another rollout runs. |
+| **Change SSH password** | the bar | Asks first. The panel then generates a password of its own for each node, changes it on the server and checks that it logs in. The passwords are not listed: reveal each one in its node's **Server → SSH access** card. The old passwords stop working. |
+| **Panel key** | **More ▾** | Puts the panel key on the nodes that log in with a password only, as the offer above the list does. Starts at once. |
+| **Bind own key…** | **More ▾** | Adds one public key line to `~/.ssh/authorized_keys` of each node. The window shows the key's type, comment and fingerprint before anything is sent; a private key or several lines are refused in the browser. |
+| **Unbind a key…** | **More ▾** | Removes a key by its public line or its `SHA256:` fingerprint. The panel key is not unbound this way: do it in a node's card. A node that did not have the key reads **Was not there**. |
+| **Decoy site…** | **More ▾** | Sets one decoy site option on all of them in one change. See [Decoy site](decoy-site.md). |
+
+Not every selected node takes part in every action, and the window and the progress say which ones sit out and why: an offline node gets no check, a node that logs in by key only has no password to change, a node with no saved SSH access gets no SSH action. The SSH actions read the nodes' saved access fresh before they start, ask you to confirm your sign-in once, and go one node at a time: the panel logs in to each server several times.
+
+A running action grows the bar upwards into a row per node: **Waiting**, **Running…**, **Done** (a check says what it found, with **Open** to the node's page), **Failed** with the reason, or **Skipped** with the reason. **Stop** lets the node in progress finish and starts no more; the rest read **Not started**. At the end a summary says how many went through: **Retry for N** runs the failed and the not started ones again, **Close** puts the rows away and keeps the selection. One action runs at a time, and leaving the page while it runs asks first. If the servers stop answering after several retries, wait a minute: each server limits how often the panel logs in.
+
+## Load
+
+**Load** reads each node's hours of host load over the last 24 hours, 7 days (the default) or 30 days, and says how loaded the node was, what runs out first and how many more people it can take. It never contacts a node. The VPS edition only: the Cloudflare edition does not keep these hours.
+
+Above the table: the nodes by status, the room left across the fleet ("room for about 80 more people") and the node with the most room.
+
+| Column | What it shows |
+|:--|:--|
+| **People at peak** | The most people online at once in the period. |
+| **Busy-hour CPU** | The CPU mean of the busiest hour: the hour the node has to get through every day. |
+| **Runs out first** | The resource closest to its limit once it is halfway there: CPU, CPU steal, bandwidth, memory, connection tracking or disk; **Nothing close** otherwise. |
+| **Room for** | How many more people the node can take before its busy hour reaches 80% CPU (and, with a known bandwidth, before its busier direction reaches 90% of it). **No room** on an overloaded node. A dash when the data cannot tell, with the reason on hover: under a day of readings, a number of people online that barely changed, or a CPU that does not follow the people. |
+| **Status** | **OK**, **Busy** (worth a look), **Overloaded** (people already feel it) or **No data**. |
+
+A node is **Busy** from a 60% busy hour, typical CPU peaks of 85% (the 75th percentile of the hourly peaks: a few moments at 100% in a day, such as the server's own updates, do not count), 10% steal, 70% of its bandwidth, 85% memory, 80% connection tracking or an 80% full disk, and **Overloaded** from an 80% busy hour, 25% steal, 90%, 95%, 95% and 92% (CPU peaks alone never make a node overloaded); the steal, connection tracking and disk thresholds are the doctor's. The bandwidth is the one set in the node's settings, else the link speed its network card reports.
+
+The arrow at the end of a row opens what to do and the numbers behind it. The recommendations name the node with the most room to move people to, say when the provider oversells the host (high steal), when connection tracking, memory or the disk fills, when the server swaps, and when the agent's memory grows day after day while the people do not (a likely leak). The cost per person, "CPU per 100 people" and "traffic per person", comes from a least-squares fit of the hourly CPU and traffic on the hourly mean of people online. An agent older than this panel does not report steal, swap, connection tracking or its own cost: those say "not known", never zero, and the node asks for an update. The [assistant](assistant.md) and MCP (`capacity_report`) read the same report.
 
 ## Node statuses
 
@@ -79,6 +120,8 @@ The page has seven tabs, each answering one question: **Overview** (is all well?
 ### Overview
 
 - **CPU**, **RAM**, **DISK**, **NETWORK**: the latest readings. The CPU bar shows the softirq part (network interrupts) in a second colour, with the vCPU count and the load. Readings arrive a few seconds after the agent connects; an offline node keeps its last readings and says since when it is offline.
+- **Resources**: what took the machine's CPU, split into **Mistgate** (the agent and every engine inside it: what Mistgate itself costs the server), **Kernel networking** (softirq), **Steal** (time the hypervisor gave to other virtual machines) and **Everything else**; memory with Mistgate's share and swap; the connection-tracking table and the agent's open files as meters (amber from 80%, red from 95%); sockets; and the link against the speed of the network card when its driver reports one. Each part explains itself on hover. An agent older than this panel does not report these: the card asks to update it.
+- **Load history**: the node's hours over the last 24 hours or 7 days, the mean and the peak of each hour: CPU, people online, and steal and Mistgate's own CPU once an updated agent has reported them. The VPS edition only.
 - **Traffic · 24 h**: hourly traffic through the node.
 - **Ways in**: a one-line strip with a chip per lane; a chip opens that lane on the **Ways in** tab, and **All ways in ›** opens the tab.
 - **Alerts**: the open alerts of this node, with the same buttons as on the Health page, and the last three that closed. **All alerts** opens the Health page. The card is hidden when there was nothing.
@@ -93,6 +136,7 @@ The checks, alerts and the doctor are described in [Health](../operations/health
 This tab shows every way people reach the node as one "metro line". On top is a chip **People · Russia** (the country of the [country check](../operations/reachability.md)), under it a vertical line with one branch per lane, and at the bottom the node itself. The lanes:
 
 - **Direct**: the node's own address and the number of ports, with a line under it: "From Russia: all networks", "Dark on MTS, Tele2", "Does not open from Russia" or "From Russia: no data".
+- **Through a CDN**: the node's VLESS profiles behind a CDN, if it has any, and their number. People connect to the CDN, not to the node, so the line under it says the country sees the CDN, not the node.
 - **Through msk1**: one lane per entry node that relays this node, with the number of servers and a line saying whether people reach the entry on the networks where this node is dark ("msk1 is seen from MTS"). Only the owner sees these lanes.
 - **IPv6 entry**: an extra server for people whose network blocks the node's IPv4 address; off until the owner turns it on (see [IPv6 entry](#ipv6-entry)). The lane is shown when the server has IPv6 or the entry is on. It reads "off", the entry's address when it is on, or "not available" with the reason under it. It opens the entry's card.
 - **Add a way in…**: a dashed row, for the owner only. When Direct is dark on some networks it turns amber: "Dark on MTS — add a way around". With no other ways yet it says: "If people's network does not see this node, give them another way in: through another node or over IPv6."
@@ -105,16 +149,20 @@ Each lane has a ring: green, works and every network sees it; half amber, works 
 
 "People connect to 203.0.113.7." Under it come the [Ports](#ports) block, then **Is de1 seen from Russia**: the country check row and, when the block is partial, the breakdown by network. Buttons: **Check ports** and a link **Profiles ›**. With no profiles it says "No profiles: people have nothing to open." and offers **Add profile**. While the country check has nothing on the node it says "The country check has nothing on this node yet." and, for the owner, links **Sources on Reachability**.
 
+**In subscriptions** (for the owner) lists the node's servers on its own address, with a switch each. Off, people do not get the server at the node's address, while it keeps running: its servers through other nodes and over IPv6 stay, and relays forward to it as before. Use it when people should reach a node only through another node, say a node abroad that people reach through an entry in Russia. When turning one off would leave people no way to the server (no working relay, no IPv6 entry, or AmneziaWG, which cannot go through another node yet), the panel asks first and says why. When every server is off, the lane reads **Not in subscriptions**. The **Through a CDN** lane has the same switches for the profiles behind a CDN.
+
 #### Ports
 
 The **Ports** block sits in the **Direct** lane of the **Ways in** tab (it used to be on the **Profiles** tab). **Check ports** runs two checks from one connected fleet node (or the panel host when available): UDP delivery and TCP reach. Each row shows the port, the verdict, when and from where it was checked, and the profile that listens there.
 
 **UDP.** The check sends probe packets from one connected fleet node (or the panel host when available) to this node and asks its agent how many arrived. It checks delivery from that sender's network path. A passing result does not prove that every client can reach the port, and a failure can depend on the sender, route or source-dependent filtering.
 
-When a port loses packets, the panel sends again at once from a second node on the other side: a node outside the CIS when the first was in it (Russia, Belarus, Kazakhstan, Kyrgyzstan, Armenia, Azerbaijan, Tajikistan, Uzbekistan, Moldova, Turkmenistan), one inside when it was not, then another provider or country. The row shows both measurements, "from minsk1 236/300 · from de1 299/300", and who is at fault:
+When a port loses packets, the panel sends again at once from a second node on the other side: a node outside the CIS when the first was in it (Russia, Belarus, Kazakhstan, Kyrgyzstan, Armenia, Azerbaijan, Tajikistan, Uzbekistan, Moldova, Turkmenistan), one inside when it was not, then another provider or country. The row shows both measurements, "from minsk1 118/150 · from de1 150/150", and who is at fault:
 
 - **Lost from both sides**: the node's port loses packets. The port counts as lossy and raises `port_lossy`.
-- **Lost from one side only**: the loss is on the way from that sender, not on this node. The port counts as fine; the sender gets the alert `path_lossy` and is asked last for the next 24 hours, so one weak path does not colour every check.
+- **Lost from one side only**: the loss is on the way from that sender, not on this node. The port counts as fine; the sender gets the alert `path_lossy` and is asked last for the next 24 hours, so one weak path does not colour every check. When the ports that sender lost got nothing at all (at most 1 %) while its other ports arrived whole (often only 443), the path is **filtered** rather than lossy, typically the hoster's DDoS protection against data-centre traffic; the alert, the event and a line under the UDP rows say so. The node is fine and people on home networks usually connect, but port checks (and a relay) from that sender cannot pass.
+
+If both senders get at least 95% of UDP 443 but at most 1% on every other tested port, Mistgate marks the node as filtered from check senders. It stops recruiting senders and confirmation runs, rechecks it at most once a day with a sender already used, and clears the mark after a clean run. A panel protocol probe through that inbound that passed after a port check, or at most 15 minutes before it, suppresses `port_lossy` for it. Such a row reads **Test blocked** in amber instead of the loss, with a line naming the protocol whose check passes, and the **Direct** lane counts the port as working. A node with the mark gets a line under the UDP rows in place of the sender's: its hoster lets only UDP 443 through from our nodes, so port checks say little there.
 
 A port is also lossy when it delivered clearly less than the other ports of the same run (the median port), by more than 4 % of the packets and more than the usual spread on a path that loses a little everywhere.
 
@@ -204,7 +252,7 @@ For AmneziaWG the row shows **Port**, **Backend** (kernel or userspace, with its
 
 The **Port** cell of each profile has a small dot with the last port check: works, loses packets or does not answer. It links to **Ways in** → **Direct**, where the [Ports](#ports) block and **Check ports** are.
 
-Under each profile a **24 h** line says what the node counted of connection attempts on it: connections, **dropped at once** (accepted, then frozen or cut within seconds: what the TSPU's freeze looks like), **key refused** (the key's term ended; a removed or rotated key is unknown to the node and counts among the unknown keys), for Hysteria2 the share of started handshakes that never authenticated (the panel's own checks are left out), for AmneziaWG how many devices never completed a handshake, and unknown keys (scanners send them too). With an agent from v0.1.57, Hysteria2 profiles also say how many connections **froze** (the node kept sending and nothing came back: how a TSPU freeze looks), the average **RTT** and the **loss**; early drops are then not marked as trouble, because most are short checks of the app. Counts only, never an address. A node whose agent does not count connections yet says so once above the profiles: update the agent.
+Under each profile a **24 h** line says what the node counted of connection attempts on it: connections, **dropped at once** (accepted, then frozen or cut within seconds: what the TSPU's freeze looks like), **key refused** (the key's term ended; a removed or rotated key is unknown to the node and counts among the unknown keys), for Hysteria2 the share of started handshakes that never authenticated (the panel's own checks are left out), for AmneziaWG how many devices never completed a handshake, and unknown keys (scanners send them too). With an agent from v0.1.79, VLESS profiles count unknown keys too: requests with a UUID the node does not know, from a removed device or an old subscription. With an agent from v0.1.57, Hysteria2 profiles also say how many connections **froze** (the node kept sending and nothing came back: how a TSPU freeze looks), the average **RTT** and the **loss**; early drops are then not marked as trouble, because most are short checks of the app. An agent that counts why handshakes fail (`links/3`) says that too: **answered, no reply** (the node answered and nothing came back), **certificate refused** (apps did not trust the node's certificate: our side), **refused by the node**, for VLESS REALITY **wrong REALITY key** and **sent to the decoy**, for VLESS **froze after 16 KB** (the TSPU's freeze of a TCP stream) and **stalled**, and for AmneziaWG on the userspace backend **answers lost** (the way back to the device is cut) and **not answered by the node** (our side). Hover a fact for a short explanation. The kernel AmneziaWG backend cannot tell an initiation from an answer, so it shows neither. Counts only, never an address. A node whose agent does not count connections yet says so once above the profiles: update the agent.
 
 On the right is the state: **Running**, **Starting**, **Failed to start** or **Off**. A profile that failed shows the cause in words and the agent's own error text under it. When the cause is clear, a button fixes it: **Change port** (the dialog opens on a free port), **Set the domain**, or **Open WARP**.
 
@@ -232,7 +280,7 @@ The setting needs an agent that reports `client-ipv6/1`. An older agent shows th
 
 **Block recognized BitTorrent traffic** is off by default. It blocks plaintext BitTorrent that the node's users start, on AmneziaWG in the kernel and on Hysteria2 in its engine, and writes a `torrent_attempt` event without any address. It needs an agent that supports it. See [Torrent protection](torrent-protection.md).
 
-**DNS resolvers for this node**: **Server's own resolver** (the default), **Yandex DNS** or **Cloudflare + Google**; a list of your own (up to 8 IP addresses, `ip:port` works too) shows as **Custom DNS** and is edited there. The node and its VPN engines resolve names with them, the names in its users' traffic included. With **Server's own resolver** the node uses whatever the server uses. For a node in Russia pick **Yandex DNS**, so Russian services such as gosuslugi.ru resolve reliably. They are not the DNS presets that apps receive, and the doctor checks the server's own resolver separately: see [DNS](dns.md).
+**DNS resolvers for this node**: **Server's own resolver** (the default), **Yandex DNS** or **Cloudflare + Google**; a list of your own (up to 8 IP addresses, `ip:port` works too) shows as **Custom DNS** and is edited there. The node and its VPN engines resolve names with them, the names in its users' traffic included. With **Server's own resolver** the node uses whatever the server uses. For a node in Russia pick **Yandex DNS**, so Russian services such as gosuslugi.ru resolve reliably; for a node in China, use **Custom DNS** with AliDNS and DNSPod (`223.5.5.5`, `119.29.29.29`). They are not the DNS presets that apps receive, and the doctor checks the server's own resolver separately: see [DNS](dns.md).
 
 **DNS choice on the user page** is a separate block of the node, not to be confused with the resolvers above. Here the owner ticks the DNS presets that people may pick for this server on their page (the order is the order on the page) and marks one as the default for the node. Only the owner changes it, and the change is written to the audit log (`node_dns_options`). A node with no presets offered gives no choice. It matters only when **DNS choice on the page** is on in **Subscriptions** → **User page**, and it reaches AmneziaWG keys and the AmneziaWG proxies of a Mihomo profile; see [DNS](dns.md).
 
@@ -283,11 +331,11 @@ What this machine is. On a wide screen, two columns: on the left one form (**Nod
 |:--|:--|
 | **Name** | a–z, 0–9 and dash, 2–24 characters, unique. |
 | **Address** | The domain or IP clients connect to, without `https://` or a port. Changing it changes the address in every subscription. |
-| **Country** | Two-letter country, or **Not set**. Server names in the apps use it ({flag} {country}), and on nodes in Russia the doctor checks gosuslugi.ru and offers Yandex DNS. |
+| **Country** | Two-letter country, or **Not set**. Server names in the apps use it ({flag} {country}); on nodes in Russia the doctor checks gosuslugi.ru and offers Yandex DNS, and on nodes in China it checks www.baidu.com and offers AliDNS and DNSPod. |
 | **Location** | Free text next to the name ("Frankfurt"). Empty shows the country name. |
 | **Provider** | The hoster, for you. |
 | **Network capacity** | Mbps, optional: the provider's symmetric limit. The node's load is its CPU use, or the busier direction of its link as a share of this capacity when that is higher; without it the load is the CPU alone (on a one-core VPS the CPU usually runs out first). The server names in Happ end with the load (" · 64％"), and the user page shows a level: low, medium or high (from 50% and 80%). Never the rates themselves, and nothing in other apps, whose names must stay stable. 0 means unknown. **Measure** can fill it in: see below. |
-| **Notes** | Free text, up to 500 characters. |
+| **Notes** | Free text, up to 500 characters. The first two lines show in the Nodes list; user pages and subscriptions never show them. |
 | **Drop the agent connection after** | 30–600 s, default 90. If the agent stays silent longer, the panel closes the connection. The node turns grey (**Host blip**) first; **Unreachable** comes after 10 minutes without contact. |
 | **Wait for a command result** | 10–900 s, default 120: how long the panel waits before a command counts as unanswered. |
 | **Agent dial timeout** | 5–120 s, default 15: how long the agent waits when it connects to the panel. |

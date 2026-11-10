@@ -69,6 +69,12 @@ const (
 	// UpdateServiceSetUpdateTimezoneProcedure is the fully-qualified name of the UpdateService's
 	// SetUpdateTimezone RPC.
 	UpdateServiceSetUpdateTimezoneProcedure = "/mistgate.admin.v1.UpdateService/SetUpdateTimezone"
+	// UpdateServiceSetUpdateChannelProcedure is the fully-qualified name of the UpdateService's
+	// SetUpdateChannel RPC.
+	UpdateServiceSetUpdateChannelProcedure = "/mistgate.admin.v1.UpdateService/SetUpdateChannel"
+	// UpdateServiceSetUpdateDownloadTimeoutProcedure is the fully-qualified name of the UpdateService's
+	// SetUpdateDownloadTimeout RPC.
+	UpdateServiceSetUpdateDownloadTimeoutProcedure = "/mistgate.admin.v1.UpdateService/SetUpdateDownloadTimeout"
 )
 
 // UpdateServiceClient is a client for the mistgate.admin.v1.UpdateService service.
@@ -105,6 +111,10 @@ type UpdateServiceClient interface {
 	CancelNodeUpdateSchedule(context.Context, *connect.Request[v1.CancelNodeUpdateScheduleRequest]) (*connect.Response[v1.CancelNodeUpdateScheduleResponse], error)
 	// Change the fixed UTC offset used to enter new scheduled updates. Existing schedules keep their original offset.
 	SetUpdateTimezone(context.Context, *connect.Request[v1.SetUpdateTimezoneRequest]) (*connect.Response[v1.SetUpdateTimezoneResponse], error)
+	// Change the release channel this panel follows. Owner-only with a fresh step-up; never available to API tokens.
+	SetUpdateChannel(context.Context, *connect.Request[v1.SetUpdateChannelRequest]) (*connect.Response[v1.SetUpdateChannelResponse], error)
+	// Change the maximum time an agent may spend downloading one update binary. Owner-only with a fresh step-up.
+	SetUpdateDownloadTimeout(context.Context, *connect.Request[v1.SetUpdateDownloadTimeoutRequest]) (*connect.Response[v1.SetUpdateDownloadTimeoutResponse], error)
 }
 
 // NewUpdateServiceClient constructs a client for the mistgate.admin.v1.UpdateService service. By
@@ -190,6 +200,18 @@ func NewUpdateServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(updateServiceMethods.ByName("SetUpdateTimezone")),
 			connect.WithClientOptions(opts...),
 		),
+		setUpdateChannel: connect.NewClient[v1.SetUpdateChannelRequest, v1.SetUpdateChannelResponse](
+			httpClient,
+			baseURL+UpdateServiceSetUpdateChannelProcedure,
+			connect.WithSchema(updateServiceMethods.ByName("SetUpdateChannel")),
+			connect.WithClientOptions(opts...),
+		),
+		setUpdateDownloadTimeout: connect.NewClient[v1.SetUpdateDownloadTimeoutRequest, v1.SetUpdateDownloadTimeoutResponse](
+			httpClient,
+			baseURL+UpdateServiceSetUpdateDownloadTimeoutProcedure,
+			connect.WithSchema(updateServiceMethods.ByName("SetUpdateDownloadTimeout")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -207,6 +229,8 @@ type updateServiceClient struct {
 	scheduleNodeUpdate       *connect.Client[v1.ScheduleNodeUpdateRequest, v1.ScheduleNodeUpdateResponse]
 	cancelNodeUpdateSchedule *connect.Client[v1.CancelNodeUpdateScheduleRequest, v1.CancelNodeUpdateScheduleResponse]
 	setUpdateTimezone        *connect.Client[v1.SetUpdateTimezoneRequest, v1.SetUpdateTimezoneResponse]
+	setUpdateChannel         *connect.Client[v1.SetUpdateChannelRequest, v1.SetUpdateChannelResponse]
+	setUpdateDownloadTimeout *connect.Client[v1.SetUpdateDownloadTimeoutRequest, v1.SetUpdateDownloadTimeoutResponse]
 }
 
 // GetUpdates calls mistgate.admin.v1.UpdateService.GetUpdates.
@@ -269,6 +293,16 @@ func (c *updateServiceClient) SetUpdateTimezone(ctx context.Context, req *connec
 	return c.setUpdateTimezone.CallUnary(ctx, req)
 }
 
+// SetUpdateChannel calls mistgate.admin.v1.UpdateService.SetUpdateChannel.
+func (c *updateServiceClient) SetUpdateChannel(ctx context.Context, req *connect.Request[v1.SetUpdateChannelRequest]) (*connect.Response[v1.SetUpdateChannelResponse], error) {
+	return c.setUpdateChannel.CallUnary(ctx, req)
+}
+
+// SetUpdateDownloadTimeout calls mistgate.admin.v1.UpdateService.SetUpdateDownloadTimeout.
+func (c *updateServiceClient) SetUpdateDownloadTimeout(ctx context.Context, req *connect.Request[v1.SetUpdateDownloadTimeoutRequest]) (*connect.Response[v1.SetUpdateDownloadTimeoutResponse], error) {
+	return c.setUpdateDownloadTimeout.CallUnary(ctx, req)
+}
+
 // UpdateServiceHandler is an implementation of the mistgate.admin.v1.UpdateService service.
 type UpdateServiceHandler interface {
 	// The whole page in one call: this panel, the bundle, every node and the active or last rollout. Never
@@ -303,6 +337,10 @@ type UpdateServiceHandler interface {
 	CancelNodeUpdateSchedule(context.Context, *connect.Request[v1.CancelNodeUpdateScheduleRequest]) (*connect.Response[v1.CancelNodeUpdateScheduleResponse], error)
 	// Change the fixed UTC offset used to enter new scheduled updates. Existing schedules keep their original offset.
 	SetUpdateTimezone(context.Context, *connect.Request[v1.SetUpdateTimezoneRequest]) (*connect.Response[v1.SetUpdateTimezoneResponse], error)
+	// Change the release channel this panel follows. Owner-only with a fresh step-up; never available to API tokens.
+	SetUpdateChannel(context.Context, *connect.Request[v1.SetUpdateChannelRequest]) (*connect.Response[v1.SetUpdateChannelResponse], error)
+	// Change the maximum time an agent may spend downloading one update binary. Owner-only with a fresh step-up.
+	SetUpdateDownloadTimeout(context.Context, *connect.Request[v1.SetUpdateDownloadTimeoutRequest]) (*connect.Response[v1.SetUpdateDownloadTimeoutResponse], error)
 }
 
 // NewUpdateServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -384,6 +422,18 @@ func NewUpdateServiceHandler(svc UpdateServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(updateServiceMethods.ByName("SetUpdateTimezone")),
 		connect.WithHandlerOptions(opts...),
 	)
+	updateServiceSetUpdateChannelHandler := connect.NewUnaryHandler(
+		UpdateServiceSetUpdateChannelProcedure,
+		svc.SetUpdateChannel,
+		connect.WithSchema(updateServiceMethods.ByName("SetUpdateChannel")),
+		connect.WithHandlerOptions(opts...),
+	)
+	updateServiceSetUpdateDownloadTimeoutHandler := connect.NewUnaryHandler(
+		UpdateServiceSetUpdateDownloadTimeoutProcedure,
+		svc.SetUpdateDownloadTimeout,
+		connect.WithSchema(updateServiceMethods.ByName("SetUpdateDownloadTimeout")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/mistgate.admin.v1.UpdateService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UpdateServiceGetUpdatesProcedure:
@@ -410,6 +460,10 @@ func NewUpdateServiceHandler(svc UpdateServiceHandler, opts ...connect.HandlerOp
 			updateServiceCancelNodeUpdateScheduleHandler.ServeHTTP(w, r)
 		case UpdateServiceSetUpdateTimezoneProcedure:
 			updateServiceSetUpdateTimezoneHandler.ServeHTTP(w, r)
+		case UpdateServiceSetUpdateChannelProcedure:
+			updateServiceSetUpdateChannelHandler.ServeHTTP(w, r)
+		case UpdateServiceSetUpdateDownloadTimeoutProcedure:
+			updateServiceSetUpdateDownloadTimeoutHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -465,4 +519,12 @@ func (UnimplementedUpdateServiceHandler) CancelNodeUpdateSchedule(context.Contex
 
 func (UnimplementedUpdateServiceHandler) SetUpdateTimezone(context.Context, *connect.Request[v1.SetUpdateTimezoneRequest]) (*connect.Response[v1.SetUpdateTimezoneResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("mistgate.admin.v1.UpdateService.SetUpdateTimezone is not implemented"))
+}
+
+func (UnimplementedUpdateServiceHandler) SetUpdateChannel(context.Context, *connect.Request[v1.SetUpdateChannelRequest]) (*connect.Response[v1.SetUpdateChannelResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("mistgate.admin.v1.UpdateService.SetUpdateChannel is not implemented"))
+}
+
+func (UnimplementedUpdateServiceHandler) SetUpdateDownloadTimeout(context.Context, *connect.Request[v1.SetUpdateDownloadTimeoutRequest]) (*connect.Response[v1.SetUpdateDownloadTimeoutResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("mistgate.admin.v1.UpdateService.SetUpdateDownloadTimeout is not implemented"))
 }

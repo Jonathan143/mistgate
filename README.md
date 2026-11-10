@@ -27,16 +27,16 @@ Hysteria2, VLESS and AmneziaWG. Two Go binaries, SQLite and systemd.</p>
 
 You put the panel on one server and add your VPN servers to it as nodes. Each person gets one subscription link, and their app picks up every server they may use. The panel keeps the nodes configured and checks them.
 
-- Add a node from the browser with its IP and root password. The panel pins the SSH host key, checks the server, opens the ports in an active UFW or firewalld and installs the signed agent. A one-time install command works too. [Add a node](docs/en/getting-started/add-node.md)
-- One link per person. Mihomo apps (kl!ck, FlClash, Clash Verge Rev) get all three protocols from it, Happ gets Hysteria2 and VLESS, and AmneziaVPN takes a key per device from the person's page. [Client apps](docs/en/guide/client-apps.md)
-- Every 5 minutes the panel connects to every server the way an app does. A doctor on each node runs 17 host checks and offers seven fixes that run only after you confirm. Alerts go to the admin and to Telegram. [Health](docs/en/operations/health.md)
-- When some networks cannot reach a server, people get to it through another of your nodes, which only forwards the encrypted traffic. The panel checks the path before switching it on and watches it afterwards; the node page draws every way in as a line from the people to the server. [Relays](docs/en/guide/relays.md)
+- Add a node from the browser by its IP with the panel's own SSH key (added once at your hoster) or the root password. The panel pins the SSH host key, checks the server, opens the ports in an active UFW or firewalld and installs the signed agent; the node's card changes the password and manages the server's SSH keys. A one-time install command works too. [Add a node](docs/en/getting-started/add-node.md)
+- One link per person. Mihomo apps (kl!ck, FlClash, Clash Verge Rev) get all three protocols from it, Happ gets Hysteria2 and VLESS, and AmneziaVPN takes a key per device from the person's page. The Mihomo and sing-box apps move to a working server by themselves. [Client apps](docs/en/guide/client-apps.md)
+- Every 5 minutes the panel connects to every server the way an app does. A doctor on each node runs 21 host checks and offers eight fixes that run only after you confirm. Alerts go to the admin and to Telegram. [Health](docs/en/operations/health.md)
+- When some networks cannot reach a server, people get to it through another of your nodes, which only forwards the encrypted traffic. The panel checks the path before switching it on and watches it afterwards; Ways in on the node page is a graph of how people reach the server, and the Nodes page maps the whole fleet. [Relays](docs/en/guide/relays.md)
 - Optional checks of whether your servers open from inside a country, network by network: Globalping probes on home and mobile networks over IPv4 and IPv6, volunteer and SIM probes, block lists and a TSPU probe from your own node. Most sources work only in Russia. [Reachability](docs/en/operations/reachability.md)
 - No Docker, no database server. The panel idles at 16-20 MiB of memory on a 1 vCPU / 1 GB server. [Benchmarks](docs/en/reference/benchmarks.md), including where Mistgate is slower.
 - Strangers who open the panel's address see a decoy site; the admin is behind a secret path or host name.
-- A built-in MCP server lets an AI agent read the fleet and plan changes; risky ones wait for your approval in the admin. [MCP](docs/en/reference/mcp.md)
+- A built-in assistant (a cloud model you connect with your own key) answers about your nodes and people and prepares changes you apply. MCP lets an outside AI agent read the fleet, test paths between your nodes and plan changes; risky ones wait for your approval in the admin. [Assistant](docs/en/guide/assistant.md), [MCP](docs/en/reference/mcp.md)
 
-Not there yet: a Telegram bot beyond alerts, and the Cloudflare Workers edition is still a [preview](docs/en/getting-started/install-edge.md). Some defaults lean towards users in Russia; all of them are settings.
+Not there yet: an app of our own (planned), a Telegram bot beyond alerts, and the Cloudflare Workers edition is still a [preview](docs/en/getting-started/install-edge.md). Some defaults lean towards users in Russia; all of them are settings.
 
 ## Protocols
 
@@ -55,7 +55,7 @@ A protocol is two halves compiled into the binaries. On the panel, one Go interf
 
 ## Is it stable?
 
-It is beta, and young: v0.1.0 was tagged on 2026-10-03, and v0.1.63 (2026-10-27) is the 64th tag. Until 1.0 the API, the stored settings and the node protocol may still change. Releases do not go through an automated upgrade test from older versions yet; that is one of the [conditions for 1.0](docs/en/roadmap/status.md).
+It is beta, and young: v0.1.0 was tagged on 2026-10-03, and v0.1.81 is the 82nd tag. Until 1.0 the API, the stored settings and the node protocol may still change. Releases do not go through an automated upgrade test from older versions yet; that is one of the [conditions for 1.0](docs/en/roadmap/status.md).
 
 I run it on my own six servers for family and friends.
 

@@ -71,6 +71,73 @@ func TestD1MigrationParity(t *testing.T) {
 	}
 }
 
+func TestD1InboundDirectInSubscriptionsRoundTripsAndDefaultsTrue(t *testing.T) {
+	binding := js.Global().Get("__d1")
+	binding.Call("__reset")
+	st, err := OpenD1(context.Background(), binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	now := time.Unix(123, 0).UTC()
+	if _, err := st.W.ExecContext(ctx, `INSERT INTO node (id, name, address, state, created_at) VALUES (?, ?, ?, ?, ?)`,
+		"nod_direct", "de1", "de1.example.com", "active", now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	a := st.Access()
+	if err := a.CreateProfile(ctx, AccessProfile{ID: "prf_direct", Protocol: "hysteria2", Name: "direct", SettingsJSON: "{}", Version: 1, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.CreateInbound(ctx, AccessInbound{ID: "inb_direct", ProfileID: "prf_direct", NodeID: "nod_direct", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	in, err := a.Inbound(ctx, "inb_direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !in.DirectInSubscriptions {
+		t.Fatal("D1 did not apply the listed-by-default migration value")
+	}
+	full, err := a.InboundsFull(ctx, "nod_direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byNode, err := a.InboundsOfNode(ctx, "nod_direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full) != 1 || !full[0].Inbound.DirectInSubscriptions || len(byNode) != 1 || !byNode[0].DirectInSubscriptions {
+		t.Fatalf("D1 inbound readers missed the default: full=%+v byNode=%+v", full, byNode)
+	}
+	in.DirectInSubscriptions = false
+	if err := a.UpdateInbound(ctx, in, false, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.Inbound(ctx, in.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fleet, err := st.FleetInbound(ctx, in.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DirectInSubscriptions || fleet.DirectInSubscriptions {
+		t.Fatalf("D1 round trip: access=%+v fleet=%+v", got, fleet)
+	}
+	full, err = a.InboundsFull(ctx, "nod_direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byNode, err = a.InboundsOfNode(ctx, "nod_direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full) != 1 || full[0].Inbound.DirectInSubscriptions || len(byNode) != 1 || byNode[0].DirectInSubscriptions {
+		t.Fatalf("D1 inbound readers missed the update: full=%+v byNode=%+v", full, byNode)
+	}
+}
+
 // D1 rejects a batch whose statement ends in a comment ("SQL code did not contain a statement"), which a SQLite-backed
 // fake does not notice, so the shape is checked here.
 func TestD1MigrationStatementsEndInCode(t *testing.T) {
@@ -119,6 +186,97 @@ func TestD1StoreSmoke(t *testing.T) {
 	rows, err := st.ListAudit(ctx, "", 0, 10)
 	if err != nil || len(rows) != 1 || rows[0].Action != "edge.smoke" {
 		t.Fatalf("ListAudit() = %+v, %v", rows, err)
+	}
+}
+
+func TestD1SubscriptionAutoSelectSettingRoundTrips(t *testing.T) {
+	binding := js.Global().Get("__d1")
+	binding.Call("__reset")
+	st, err := OpenD1(context.Background(), binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	for _, value := range []string{`{"link_auto_select":true}`, `{"link_auto_select":false}`, `{"title":"old settings"}`} {
+		if err := st.SetSettings(ctx, map[string]string{"subscription_settings": value}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.Setting(ctx, "subscription_settings")
+		if err != nil || got != value {
+			t.Fatalf("D1 subscription_settings = %q, %v; want %q", got, err, value)
+		}
+	}
+}
+
+func TestD1AssistantBudgetSettingsAndConversationBehavior(t *testing.T) {
+	ctx := context.Background()
+	st := openD1Store(t)
+	now := time.Unix(1_800_000_000, 0).UTC()
+	if _, err := st.W.ExecContext(ctx, `INSERT INTO assistant_settings(id) VALUES(1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveAssistantSettings(ctx, nil, true, 2, 2, 1, 0, []byte("sealed-notes"), 30, now); err != nil {
+		t.Fatal(err)
+	}
+	var clear string
+	var notes []byte
+	if err := st.R.QueryRowContext(ctx, `SELECT panel_notes,panel_notes_enc FROM assistant_settings WHERE id=1`).Scan(&clear, &notes); err != nil {
+		t.Fatal(err)
+	}
+	if clear != "" || string(notes) != "sealed-notes" {
+		t.Fatalf("D1 did not save encrypted assistant notes: clear=%q enc=%q", clear, notes)
+	}
+
+	month, provider := "202611", int32(2)
+	if _, err := st.W.ExecContext(ctx, `INSERT INTO assistant_provider(provider,budget_usd) VALUES(?,1)`, provider); err != nil {
+		t.Fatal(err)
+	}
+	firstID, secondID := "asres_d1_first", "asres_d1_second"
+	if ok, err := st.ReserveAssistantBudget(ctx, firstID, month, "adm_d1", provider, "deepseek-flash", .7, 1, now); err != nil || !ok {
+		t.Fatalf("first D1 reservation: accepted=%v err=%v", ok, err)
+	}
+	if ok, err := st.ReserveAssistantBudget(ctx, secondID, month, "adm_d1", provider, "deepseek-flash", .4, 1, now); err != nil || ok {
+		t.Fatalf("D1 reservation exceeded provider budget: accepted=%v err=%v", ok, err)
+	}
+	if err := st.ReconcileAssistantBudget(ctx, firstID, month, "adm_d1", provider, 10, 4, .25, true, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReconcileAssistantBudget(ctx, firstID, month, "adm_d1", provider, 10, 4, .25, true, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var usd float64
+	var input, output, turns int64
+	if err := st.R.QueryRowContext(ctx, `SELECT usd,input_tokens,output_tokens,turns FROM assistant_usage WHERE month=? AND admin_id=? AND provider=?`, month, "adm_d1", provider).Scan(&usd, &input, &output, &turns); err != nil {
+		t.Fatal(err)
+	}
+	if usd != .25 || input != 10 || output != 4 || turns != 1 {
+		t.Fatalf("D1 reconciled assistant usage: usd=%v input=%d output=%d turns=%d", usd, input, output, turns)
+	}
+	if ok, err := st.ReserveAssistantBudget(ctx, secondID, month, "adm_d1", provider, "deepseek-flash", .7, 1, now); err != nil || !ok {
+		t.Fatalf("D1 did not release reconciled reservation headroom: accepted=%v err=%v", ok, err)
+	}
+
+	if _, err := st.W.ExecContext(ctx, `INSERT INTO assistant_conversation(id,admin_id,title_enc,summary_enc,created_at,updated_at) VALUES('cnv_d1','adm_d1',X'01',X'02',?,?)`, now.Unix(), now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.W.ExecContext(ctx, `INSERT INTO assistant_message(id,conversation_id,admin_id,role,body_enc,created_at) VALUES('msg_d1','cnv_d1','adm_d1','user',X'03',?)`, now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := st.DeleteAssistantConversation(ctx, "adm_d1", "cnv_d1"); err != nil || !deleted {
+		t.Fatalf("D1 conversation delete: deleted=%v err=%v", deleted, err)
+	}
+	var count int
+	if err := st.R.QueryRowContext(ctx, `SELECT count(*) FROM assistant_message WHERE conversation_id='cnv_d1'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("D1 conversation delete left messages: count=%d err=%v", count, err)
+	}
+	result, err := st.W.ExecContext(ctx, `INSERT INTO assistant_message(id,conversation_id,admin_id,role,body_enc,created_at)
+		SELECT 'msg_late','cnv_d1','adm_d1','assistant',X'04',? WHERE EXISTS (SELECT 1 FROM assistant_conversation WHERE id='cnv_d1' AND admin_id='adm_d1')`, now.Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 0 {
+		t.Fatalf("D1 accepted a message after its conversation was deleted: rows=%d err=%v", rows, err)
 	}
 }
 
@@ -1496,6 +1654,55 @@ func TestD1RewrittenAccessMethods(t *testing.T) {
 	})
 }
 
+func TestD1LinkAWGKeyCountAndRevoke(t *testing.T) {
+	ctx := context.Background()
+	st := openD1Store(t)
+	now := time.Unix(1_800_000_000, 0).UTC()
+	if err := st.Access().CreateGroup(ctx, AccessGroup{ID: "grp_link_awg", Name: "Link AWG", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	user := AccessUser{ID: "usr_link_awg", Name: "Link AWG", GroupID: "grp_link_awg", Status: "active", AppHapp: true,
+		AppAmnezia: true, AllNodes: true, QuotaReset: "none", PeriodStart: now, DeviceLimit: 5, SubTokenHash: []byte("link-awg-hash"),
+		SubTokenEnc: []byte("sealed"), CreatedAt: now}
+	if err := st.Access().CreateUser(ctx, user, AccessDevice{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	profileID := "prf_link_awg"
+	if err := st.Access().CreateProfile(ctx, AccessProfile{ID: profileID, Protocol: "awg", Name: profileID, SettingsJSON: "{}", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	want := []AWGImplicitWant{{ProfileID: profileID, MaxIdx: 8, Issue: func(int) (AccessCred, string, error) {
+		return AccessCred{ID: "crd_link_awg", Protocol: "awg", SecretEnc: []byte("sealed"), DataJSON: `{}`}, "pub_link_awg", nil
+	}}}
+	link, err := st.Access().EnsureLinkAWGCreds(ctx, AccessDevice{ID: "dev_link_awg", UserID: user.ID, Implicit: true}, user.DeviceLimit, now, want)
+	if err != nil || len(link.Added) != 1 {
+		t.Fatalf("link AWG credential = %+v, %v", link, err)
+	}
+	if _, err := st.Access().AddAWGDevice(ctx, AWGDeviceAdd{Device: AccessDevice{ID: "dev_explicit_awg", UserID: user.ID}, ProfileID: profileID, MaxIdx: 8, Limit: 5}, now,
+		func(int) (AccessCred, string, error) {
+			return AccessCred{ID: "crd_explicit_awg", Protocol: "awg", SecretEnc: []byte("sealed"), DataJSON: `{}`}, "pub_explicit_awg", nil
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.Access().CountLinkAWGKeys(ctx); err != nil || got != 1 {
+		t.Fatalf("CountLinkAWGKeys = %d, %v; want only the link peer", got, err)
+	}
+	if dropped, err := st.Access().RevokeLinkAWGCreds(ctx, link.Device, now); err != nil || dropped != 1 {
+		t.Fatalf("RevokeLinkAWGCreds = %d, %v; want one", dropped, err)
+	}
+	if got, err := st.Access().CountLinkAWGKeys(ctx); err != nil || got != 0 {
+		t.Fatalf("CountLinkAWGKeys after revoke = %d, %v; want zero", got, err)
+	}
+	var released, revoked int
+	if err := st.R.QueryRowContext(ctx, `SELECT p.released_at, c.revoked_at FROM awg_peer p JOIN device_credential c ON c.id = p.credential_id WHERE c.id = 'crd_link_awg'`).Scan(&released, &revoked); err != nil || int64(released) != now.Unix() || int64(revoked) != now.Unix() {
+		t.Fatalf("link peer released/revoked = %d/%d, %v; want %d", released, revoked, err, now.Unix())
+	}
+	keys, err := st.Access().AWGDevices(ctx, user.ID)
+	if err != nil || len(keys) != 1 || keys[0].ID != "dev_explicit_awg" {
+		t.Fatalf("explicit AmneziaVPN keys = %+v, %v; want the original key", keys, err)
+	}
+}
+
 func TestD1RewrittenDNSAndSettingsMethods(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -1901,6 +2108,10 @@ func TestD1ClientProbeReportsStorage(t *testing.T) {
 	clientProbeStoreProof(t, openD1Store(t))
 }
 
+func TestD1LinkReasonsStorage(t *testing.T) {
+	linkReasonsStoreProof(t, openD1Store(t))
+}
+
 func TestD1LinkHourStorage(t *testing.T) {
 	st := openD1Store(t)
 	linkHourStoreProof(t, st)
@@ -2010,4 +2221,8 @@ func TestD1LinkDNS(t *testing.T) {
 	if eff, err := d.EffectiveData(ctx, "usr_link_dns"); err != nil || eff.LinkPick != "" || len(eff.LinkOptions) != 1 || eff.LinkOptions[0].Default {
 		t.Fatalf("after the preset was deleted: %+v %v", eff, err)
 	}
+}
+
+func TestD1NodeRuntimeStorage(t *testing.T) {
+	nodeRuntimeStoreProof(t, openD1Store(t))
 }

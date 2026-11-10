@@ -1,3 +1,5 @@
+//go:build !js
+
 package mcp
 
 import (
@@ -5,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -54,7 +57,11 @@ func (t toolDef) description() string {
 
 // registry is every tool; a name may appear twice with different minimum profiles (node_doctor has a refresh argument only
 // for operators): a server takes the highest entry its profile reaches.
-var registry = slices.Concat(readTools(), changeTools(), nodeProvisionTools(), subscriptionTools(), profileTools(), relayTools(), ipv6Tools())
+var registry = slices.Concat(
+	readTools(), ownerReadTools(), changeTools(), nodeProvisionTools(), subscriptionTools(),
+	groupTools(), dnsTools(), nodeSettingsTools(), profileTools(), relayTools(), ipv6Tools(), batchTools(), insightTools(), dataTools(), probeTools(), observabilityTools(), accessTools(),
+	capacityTools(), taskTools(),
+)
 
 // toolsFor lists the tools a profile sees, by name.
 func toolsFor(p Profile) []toolDef {
@@ -75,6 +82,16 @@ func toolsFor(p Profile) []toolDef {
 	return out
 }
 
+// ToolNames lists, sorted, the names of the tools a token profile sees: the registry that tests and the end-to-end harness
+// (scripts/e2e/mcpe2e) compare a running server against, so a tool count is never written down twice.
+func ToolNames(p Profile) []string {
+	var names []string
+	for _, t := range toolsFor(p) {
+		names = append(names, t.name)
+	}
+	return names
+}
+
 func (e *env) newServer(p Profile) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "mistgate", Version: buildinfo.Version}, &mcp.ServerOptions{
 		Instructions: instructions,
@@ -89,12 +106,13 @@ func (e *env) newServer(p Profile) *mcp.Server {
 
 // call is one tool call: who is calling, a context carrying the MCP channel and a deadline, and the in-process clients.
 type call struct {
-	e       *env
-	ctx     context.Context
-	tokenID string
-	profile Profile
-	cl      *clients
-	cancel  context.CancelFunc
+	e         *env
+	ctx       context.Context
+	tokenID   string
+	profile   Profile
+	assistant *AssistantIdentity
+	cl        *clients
+	cancel    context.CancelFunc
 }
 
 func (c *call) done() { c.cancel() }
@@ -102,14 +120,34 @@ func (c *call) done() { c.cancel() }
 // begin resolves the token of the request (the bearer layer put it in TokenInfo) and prepares the call.
 func (e *env) begin(ctx context.Context, req *mcp.CallToolRequest, timeout time.Duration) (*call, error) {
 	ex := req.GetExtra()
-	if ex == nil || ex.TokenInfo == nil || ex.TokenInfo.UserID == "" || len(ex.TokenInfo.Scopes) == 0 {
-		return nil, errors.New("not authenticated")
+	var tokenID string
+	var profile Profile
+	var header http.Header
+	var assistant *AssistantIdentity
+	if id, ok := assistantCallIdentity(ctx); ok {
+		auth, hasAssistantAuth := e.cfg.Auth.(assistantAuth)
+		if !hasAssistantAuth || id.TokenID == "" || id.AdminID == "" {
+			return nil, errors.New("not authenticated")
+		}
+		identity := id
+		assistant = &identity
+		tokenID, profile = id.TokenID, Profile(id.Profile)
+		header = make(http.Header)
+		_ = auth
+	} else {
+		if ex == nil || ex.TokenInfo == nil || ex.TokenInfo.UserID == "" || len(ex.TokenInfo.Scopes) == 0 {
+			return nil, errors.New("not authenticated")
+		}
+		tokenID, profile, header = ex.TokenInfo.UserID, Profile(ex.TokenInfo.Scopes[0]), ex.Header
 	}
 	remote, _ := ctx.Value(remoteKey{}).(string)
 	ctx, cancel := context.WithTimeout(e.cfg.Auth.WithChannel(ctx), timeout)
+	if assistant != nil {
+		ctx = e.cfg.Auth.(assistantAuth).WithAssistant(ctx, *assistant)
+	}
 	return &call{
-		e: e, ctx: ctx, cancel: cancel, tokenID: ex.TokenInfo.UserID, profile: Profile(ex.TokenInfo.Scopes[0]),
-		cl: newClients(e.cfg.API, ex.Header, remote),
+		e: e, ctx: ctx, cancel: cancel, tokenID: tokenID, profile: profile, assistant: assistant,
+		cl: newClients(e.cfg.API, header, remote),
 	}, nil
 }
 

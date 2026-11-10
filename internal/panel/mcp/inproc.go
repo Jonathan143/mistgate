@@ -1,3 +1,5 @@
+//go:build !js
+
 package mcp
 
 import (
@@ -11,6 +13,9 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/mistgate/mistgate/gen/mistgate/admin/v1/adminv1connect"
+	"github.com/mistgate/mistgate/gen/mistgate/ops/v1/opsv1connect"
+	"github.com/mistgate/mistgate/gen/mistgate/probe/v1/probev1connect"
+	"github.com/mistgate/mistgate/gen/mistgate/tasks/v1/tasksv1connect"
 )
 
 // forwardedHeaders are the request headers of the agent's MCP call that an in-process API call carries: the credential
@@ -57,6 +62,12 @@ type clients struct {
 	Warp         adminv1connect.WarpServiceClient
 	ClientProbe  adminv1connect.ClientProbeServiceClient
 	Relay        adminv1connect.RelayServiceClient
+	DNS          adminv1connect.DnsServiceClient
+	Reachability adminv1connect.CountryReachabilityServiceClient
+	Backup       adminv1connect.BackupServiceClient
+	Probe        probev1connect.ProbeServiceClient
+	Ops          opsv1connect.OpsServiceClient
+	Tasks        tasksv1connect.TasksServiceClient
 }
 
 func newClients(h http.Handler, header http.Header, remote string) *clients {
@@ -76,6 +87,12 @@ func newClients(h http.Handler, header http.Header, remote string) *clients {
 		Warp:         adminv1connect.NewWarpServiceClient(hc, base),
 		ClientProbe:  adminv1connect.NewClientProbeServiceClient(hc, base),
 		Relay:        adminv1connect.NewRelayServiceClient(hc, base),
+		DNS:          adminv1connect.NewDnsServiceClient(hc, base),
+		Reachability: adminv1connect.NewCountryReachabilityServiceClient(hc, base),
+		Backup:       adminv1connect.NewBackupServiceClient(hc, base),
+		Probe:        probev1connect.NewProbeServiceClient(hc, base),
+		Ops:          opsv1connect.NewOpsServiceClient(hc, base),
+		Tasks:        tasksv1connect.NewTasksServiceClient(hc, base),
 	}
 }
 

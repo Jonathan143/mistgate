@@ -28,9 +28,9 @@ import (
 	"github.com/mistgate/mistgate/web"
 )
 
-// AdminHandler is one more Connect service of the admin API. Path is the prefix the
-// generated constructor returns ("/mistgate.admin.v1.NodeService/"). It is served at
-// /api<Path> behind the session middleware, so handlers can rely on auth.AdminFrom.
+// AdminHandler is one more handler under the admin API, usually a Connect service but
+// sometimes a plain HTTP route. Path is its prefix and is served at /api<Path> behind
+// the session middleware, so handlers can rely on auth.AdminFrom.
 type AdminHandler struct {
 	Path    string
 	Handler http.Handler
@@ -116,6 +116,18 @@ type Config struct {
 	// on the admin surface (behind the secret prefix, host or separate listener): never on the decoy side, the public mounts
 	// or the agent endpoint. The handler authenticates its own requests (a bearer token, never a cookie). nil: no endpoint.
 	MCP func(api http.Handler) http.Handler
+	// AdminAPIReady is called with the authenticated in-process API after all handlers have been registered. Internal
+	// services that act through the same API can bind here without depending on the HTTP listener.
+	AdminAPIReady func(api http.Handler)
+	// Metrics, if set, is asked first for <admin>/metrics on the admin surface only. It authenticates its own requests (a
+	// bearer secret of its own, never a session) and returns false, having written nothing, while the owner has the endpoint
+	// off: the request then gets what any unknown admin path gets. nil: no endpoint (the Cloudflare edition).
+	Metrics func(w http.ResponseWriter, r *http.Request) bool
+	// RPCStats, if set, is told about every admin API call (/api/...) when it ends: its status, how long it took and whether
+	// it was a stream (rpcstat.Window, read by OpsService.GetPanelResources). The VPS edition only.
+	RPCStats interface {
+		Record(status int, d time.Duration, stream bool)
+	}
 }
 
 // mcpWriteWindow is how long an MCP call may take to answer: longer than the listener's write timeout, because a plan that
@@ -219,7 +231,10 @@ func (a apiRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // longUnary are the admin calls that answer after more than the listener's write timeout: a TSPU probe test runs for minutes.
-var longUnary = map[string]bool{adminv1connect.TspuProbeServiceTestTspuProbeProcedure: true}
+var longUnary = map[string]bool{
+	adminv1connect.TspuProbeServiceTestTspuProbeProcedure: true,
+	auth.BackupDownloadProcedure:                          true, // the archive is streamed after its snapshot
+}
 
 // isStream reports a Connect or gRPC streaming-capable request: its response may last
 // longer than the listener's write timeout.
@@ -292,8 +307,12 @@ func New(cfg Config, a *auth.Service, st *store.Store) (*Server, error) {
 		s.pages[page.Path+"/"] = protected
 	}
 	s.logo = NewLogoHandler(st, cfg.Log)
+	protectedAPI := a.RequireSession(s.api)
+	if cfg.AdminAPIReady != nil {
+		cfg.AdminAPIReady(protectedAPI)
+	}
 	if cfg.MCP != nil {
-		s.mcp = cfg.MCP(a.RequireSession(s.api))
+		s.mcp = cfg.MCP(protectedAPI)
 	}
 	if cfg.UserPagePreview != nil {
 		s.preview = s.requireLinkAccess(http.HandlerFunc(s.servePreview))
@@ -565,7 +584,7 @@ func (s *Server) AdminListener() http.Handler {
 func (s *Server) newAdmin(base string) http.Handler {
 	api := http.StripPrefix("/api", s.auth.RequireSession(withVersion(s.api)))
 	spa := s.spa(base)
-	return s.securityHeaders(s.cop.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.requestID(s.securityHeaders(s.cop.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch p := r.URL.Path; {
 		case p == "/api/recover-login":
 			if !s.auth.RecoveryEnabled() {
@@ -578,6 +597,7 @@ func (s *Server) newAdmin(base string) http.Handler {
 		case p == "/mcp" && s.mcp != nil:
 			http.NewResponseController(w).SetWriteDeadline(time.Now().Add(mcpWriteWindow)) // the error: a writer without deadlines
 			s.mcp.ServeHTTP(w, r)
+		case p == "/metrics" && s.serveMetrics(w, r): // answered (token, or 401); false: off, fall through
 		case p == "/brand/logo.svg":
 			s.logo.ServeHTTP(w, r)
 		case p == "/recover" && !s.auth.RecoveryEnabled():
@@ -589,7 +609,7 @@ func (s *Server) newAdmin(base string) http.Handler {
 		default:
 			spa.ServeHTTP(w, r)
 		}
-	})))
+	}))))
 }
 
 // cloudflare is the one third-party origin the admin pages may use: while the captcha is on, and on the page where the

@@ -26,6 +26,8 @@ import (
 const (
 	capAWG   = "awg/1"
 	capVLESS = "vless/1"
+	// capVLESSUnknownKeys marks agents that report VLESS unknown-user-ID attempts in links/1.
+	capVLESSUnknownKeys = "vless-unknown-keys/1"
 	// capVLESSTLS: the VLESS engine terminates TLS through its certificate source before Xray receives a connection.
 	capVLESSTLS = "vless-tls/1"
 	// capVLESSSelf: the VLESS engine serves the node's own site behind REALITY (reality.target "self", design/vless.md
@@ -35,14 +37,22 @@ const (
 	capTorrentGuard = "torrentguard/1"
 	capUDPCheck     = "udpcheck/1"
 	capTCPCheck     = "tcpcheck/1"
-	capDecoy        = "decoy/1"
+	// capProbe: UdpSend.df, the "connect" kind and the timings of TcpProbe, PathTrace (agent.proto "PATH PROBE").
+	capProbe = "probe/1"
+	capDecoy = "decoy/1"
 	// capClientIPv6: the agent follows NodeSettings.client_ipv6_disabled (the tunnel firewall and the direct egress).
 	capClientIPv6 = "client-ipv6/1"
 	capWSLink     = "ws-link/1"
 	capLinkCounts = "links/1"
+	// capNets enables locally mapped ASN counters. Link-only agents cannot fetch the signed table in v1.
+	capNets = "nets/1"
 	// capLinks2: the Hysteria2 connection endings, RTT and packet counters of StatsBatch.links (agent.proto LinkCounters from
 	// client_closes on). Listed with links/1, which a panel checks for the counters at all.
 	capLinks2 = "links/2"
+	// capLinks3: the handshake-failure reasons of StatsBatch.links (agent.proto LinkCounters from hs_unfinished on) and the
+	// VLESS hellos, hellos_foreign and connects. Each engine counts what it can see; the panel knows the rest from the
+	// protocol, the VLESS transport and the AWG backend.
+	capLinks3 = "links/3"
 	// capJournal sends the node's deduplicated WARN+ records in StatsBatch.journal.
 	capJournal = "journal/1"
 	// capUserRateLimit: the engines that shape traffic per credential also share a bucket per person
@@ -139,12 +149,18 @@ func (a *Agent) reconnectWarp(ctx context.Context) *pb.CommandResult {
 
 // capabilities is the Hello.capabilities list of this build.
 func (a *Agent) capabilities() []string {
-	caps := []string{capDoctor, capBandwidth, capClientIPv6, capWSLink, capTCPCheck, capDecoy, capLinkCounts, capLinks2, capJournal}
+	caps := []string{capDoctor, capBandwidth, capClientIPv6, capWSLink, capTCPCheck, capDecoy, capLinkCounts, capLinks2, capLinks3, capJournal, capProbe, capSpeed, capDebug}
+	if !a.linkOnly() {
+		caps = append(caps, capNets)
+	}
+	if kernelDebugSupported() {
+		caps = append(caps, capDebug2)
+	}
 	if _, ok := a.engines[awg.Protocol]; ok {
 		caps = append(caps, capAWG)
 	}
 	if _, ok := a.engines["vless"]; ok {
-		caps = append(caps, capVLESS)
+		caps = append(caps, capVLESS, capVLESSUnknownKeys)
 		if a.cfg.Certs != nil { // the site needs the certificate source
 			caps = append(caps, capVLESSSelf, capVLESSTLS)
 		}
@@ -183,6 +199,9 @@ func (a *Agent) capabilities() []string {
 	if a.linkOnly() {
 		if slices.Contains(updateCaps, update.CapUpdate) {
 			caps = append(caps, capUpdateLink)
+			if slices.Contains(updateCaps, update.CapUpdateTimeout) {
+				caps = append(caps, update.CapUpdateTimeout)
+			}
 			if slices.Contains(updateCaps, update.CapGuard) {
 				caps = append(caps, update.CapGuard)
 			}

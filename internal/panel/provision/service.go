@@ -550,13 +550,13 @@ func (s *Service) sealCredentials(jobID string, secret credentials) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	ciphertext := s.vault.Seal(plain, "node-provision:"+jobID)
+	ciphertext := s.vault.Seal(plain, store.NodeProvisionCredentialsAAD(jobID))
 	clearBytes(plain)
 	return ciphertext, nil
 }
 
 func (s *Service) openCredentials(jobID string, ciphertext []byte) (credentials, error) {
-	plain, err := s.vault.Open(ciphertext, "node-provision:"+jobID)
+	plain, err := s.vault.Open(ciphertext, store.NodeProvisionCredentialsAAD(jobID))
 	if err != nil {
 		return credentials{}, err
 	}
@@ -616,6 +616,7 @@ func (s *Service) ListNodeServerAccess(ctx context.Context, _ *connect.Request[a
 // with a fresh authentication before the panel promotes the encrypted credential. With generate the panel makes the
 // password itself (the MCP rotation): it is never returned, the owner can reveal it after step-up.
 func (s *Service) RotateNodeServerPassword(ctx context.Context, req *connect.Request[adminv1.RotateNodeServerPasswordRequest]) (*connect.Response[adminv1.RotateNodeServerPasswordResponse], error) {
+	defer func() { req.Msg.NewPassword = "" }()
 	if err := s.cfg.StepUp(ctx); err != nil {
 		return nil, err
 	}
@@ -672,7 +673,7 @@ func (s *Service) RotateNodeServerPassword(ctx context.Context, req *connect.Req
 		return nil, internalConnectError()
 	}
 	pendingPlain := []byte(newPassword)
-	pendingCiphertext := s.vault.Seal(pendingPlain, "node-access-pending:"+access.NodeID)
+	pendingCiphertext := s.vault.Seal(pendingPlain, store.PendingNodeServerPasswordAAD(access.NodeID))
 	clearBytes(pendingPlain)
 	if err := s.st.SetPendingNodeServerPassword(ctx, access.NodeID, pendingCiphertext, req.Msg.Generate, s.cfg.Now().UTC()); err != nil {
 		return nil, internalConnectError()
@@ -737,7 +738,7 @@ func (s *Service) openAccessPassword(nodeID string, ciphertext []byte) (string, 
 	if len(ciphertext) == 0 {
 		return "", nil
 	}
-	plain, err := s.vault.Open(ciphertext, "node-access:"+nodeID)
+	plain, err := s.vault.Open(ciphertext, store.NodeServerAccessPasswordAAD(nodeID))
 	if err != nil {
 		return "", err
 	}
@@ -750,13 +751,13 @@ func (s *Service) openAccessPassword(nodeID string, ciphertext []byte) (string, 
 
 func (s *Service) sealAccessPassword(nodeID, password string) []byte {
 	plain := []byte(password)
-	ciphertext := s.vault.Seal(plain, "node-access:"+nodeID)
+	ciphertext := s.vault.Seal(plain, store.NodeServerAccessPasswordAAD(nodeID))
 	clearBytes(plain)
 	return ciphertext
 }
 
 func (s *Service) openPendingPassword(nodeID string, ciphertext []byte) (string, error) {
-	plain, err := s.vault.Open(ciphertext, "node-access-pending:"+nodeID)
+	plain, err := s.vault.Open(ciphertext, store.PendingNodeServerPasswordAAD(nodeID))
 	if err != nil {
 		return "", err
 	}

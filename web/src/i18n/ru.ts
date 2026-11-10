@@ -13,6 +13,7 @@ import { ru as telegramRu } from "./telegram";
 import { ru as portsRu } from "./ports";
 import { ru as editionRu } from "./edition";
 import { ru as decoyRu } from "./decoy";
+import { ru as bulkRu } from "./bulk";
 import { ru as countryRu } from "./country";
 import { ru as connectionsRu } from "./connections";
 import { ru as journalRu } from "./journal";
@@ -20,6 +21,15 @@ import { ru as relayRu } from "./relay";
 import { ru as waysRu } from "./ways";
 import { ru as tgproxyRu } from "./tgproxy";
 import { ru as protocolsRu } from "./protocols";
+import { ru as aiRu } from "./ai";
+import { ru as graphRu } from "./graph";
+import { ru as waysgraphRu } from "./waysgraph";
+import { ru as fleetmapRu } from "./fleetmap";
+import { ru as observabilityRu } from "./observability";
+import { ru as debugRu } from "./debug";
+import { ru as resourcesRu } from "./resources";
+import { ru as tasksRu } from "./tasks";
+import { ru as followupRu } from "./followup";
 
 // Typed against the English shape: a missing or extra key fails `pnpm typecheck`. The admin UI speaks «ты».
 const core: CoreMessages = {
@@ -74,7 +84,7 @@ const core: CoreMessages = {
   "section.health.desc": "Алерты, проверки глазами клиента и доктор флота.",
   "section.reachability.desc": "Открываются ли ноды изнутри страны: источники, вердикт каждой ноды и её неделя.",
   "section.updates.desc": "Версии панели и агентов нод, поэтапные выкатки и откат.",
-  "section.integrations.desc": "API-токены для скриптов, MCP для ИИ-агентов и изменения, которые они просят одобрить.",
+  "section.integrations.desc": "Оповещения в Telegram: каждый админ привязывает свой чат.",
   "section.settings.desc": "Админы, безопасность, бэкапы и домены.",
   "section.empty": "Здесь пока пусто",
 
@@ -150,6 +160,13 @@ const core: CoreMessages = {
   "settings.accent.rose": "Роза",
   "settings.accent.sage": "Шалфей",
   "settings.local": "Эти настройки хранятся только на этом устройстве.",
+  "settings.fx": "Анимация появления",
+  "settings.fx.beta": "Бета",
+  "settings.fx.show": "Показать",
+  "settings.fx.create": "Когда что-то создаётся",
+  "settings.fx.save": "Когда что-то сохраняется или ассистент ответил",
+  "settings.fx.pages": "Когда открываются страницы",
+  "settings.fx.hint": "Новая нода, человек, группа или профиль проявляется под лёгкой цветной волной, а от нажатой кнопки расходится мягкое кольцо света. Если выключить или в системе включено уменьшение движения, новое просто появляется.",
   "settings.device": "Только на этом устройстве",
 
   "auth.setup.welcomeTitle": "Привет!",
@@ -278,4 +295,4 @@ const core: CoreMessages = {
   "field.reality.target_kind.invalid_enum": "Сайт этой ноды или другой сайт",
 };
 
-export const ru: Messages = { ...core, ...opsRu, ...usersRu, ...securityRu, ...profilesRu, ...subsRu, ...healthRu, ...updatesRu, ...awgRu, ...warpRu, ...integrationsRu, ...telegramRu, ...portsRu, ...editionRu, ...decoyRu, ...countryRu, ...connectionsRu, ...journalRu, ...relayRu, ...waysRu, ...tgproxyRu, ...protocolsRu };
+export const ru: Messages = { ...core, ...opsRu, ...usersRu, ...securityRu, ...profilesRu, ...subsRu, ...healthRu, ...updatesRu, ...awgRu, ...warpRu, ...integrationsRu, ...telegramRu, ...portsRu, ...editionRu, ...decoyRu, ...bulkRu, ...countryRu, ...connectionsRu, ...journalRu, ...relayRu, ...waysRu, ...tgproxyRu, ...protocolsRu, ...aiRu, ...graphRu, ...waysgraphRu, ...fleetmapRu, ...observabilityRu, ...debugRu, ...resourcesRu, ...tasksRu, ...followupRu };

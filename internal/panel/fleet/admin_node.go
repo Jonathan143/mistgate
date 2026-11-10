@@ -240,28 +240,19 @@ func pct(used, total uint64) float32 {
 
 // nodeMsg builds the Node message. protos, todayBytes, enabled and live are looked up by the caller once per
 // request.
-func capabilityPresent(caps []string, want string) bool {
-	for _, cap := range caps {
-		if cap == want {
-			return true
-		}
-	}
-	return false
-}
-
 func (f *Fleet) nodeMsg(ctx context.Context, n store.NodeRow, protos []string, todayBytes uint64, enabled map[string]string, now time.Time, live store.NodeLiveRow, panelBundle *decoy.Bundle, health store.NodeHealthSummary, d6 store.IPv6Doctor) *adminv1.Node {
 	view := decodeLiveView(live)
 	st := f.statusOfLive(ctx, n, live, enabled, now, health)
 	out := &adminv1.Node{
-		Id: n.ID, Name: n.Name, CountryCode: n.CountryCode, Location: n.Location, Provider: n.Provider, Address: n.Address,
+		Id: n.ID, Name: n.Name, CountryCode: n.CountryCode, Location: n.Location, Provider: n.Provider, Address: n.Address, Notes: n.Notes,
 		Status: st.status, Reason: st.reason, Protocols: protos, TrafficTodayBytes: todayBytes, AgentVersion: n.AgentVersion,
 		LastSeenUnix: fleetUnix(live.LastSeenAt), AwgBackend: n.AwgBackend, TorrentBlockerEnabled: n.TorrentBlockerEnabled,
 		BandwidthMbps: uint32(n.BandwidthMbps), ClientIpv6: n.ClientIPv6,
 	}
 	caps := live.AgentCaps
-	out.TorrentBlockerSupported = capabilityPresent(caps, capTorrentGuard)
-	out.ClientIpv6Supported = capabilityPresent(caps, capClientIPv6)
-	out.UserRateLimitSupported = capabilityPresent(caps, capUserRateLimit)
+	out.TorrentBlockerSupported = store.CapabilityPresent(caps, capTorrentGuard)
+	out.ClientIpv6Supported = store.CapabilityPresent(caps, capClientIPv6)
+	out.UserRateLimitSupported = store.CapabilityPresent(caps, capUserRateLimit)
 	out.AwgPrepare = awgPrepareMsg(n, caps, now)
 	out.Ipv6 = ipv6Msg(n, d6)
 	if live.Connected {
@@ -271,7 +262,7 @@ func (f *Fleet) nodeMsg(ctx context.Context, n store.NodeRow, protos []string, t
 		}
 	}
 	out.Warp = f.warpSummary(ctx, n.ID, live.Connected, now)
-	decoySupported := capabilityPresent(caps, capDecoy)
+	decoySupported := store.CapabilityPresent(caps, capDecoy)
 	agentMode := n.DecoyAgentMode
 	if agentMode == "" && !decoySupported {
 		agentMode = decoy.ModeBuiltin
@@ -427,6 +418,20 @@ func (s nodeService) GetNode(ctx context.Context, req *connect.Request[adminv1.G
 	if err != nil {
 		return nil, internalErr(f.log.Error, "node UDP port checks", err)
 	}
+	protocolOKAt, err := f.portProtocolOKAt(ctx, n, inbounds)
+	if err != nil {
+		return nil, internalErr(f.log.Error, "node protocol probe results", err)
+	}
+	for i := range portChecks {
+		portChecks[i].ProtocolOKAt = protocolOKAt[portChecks[i].Port]
+	}
+	udpFilteredAt, err := f.st.UDPFilteredAt(ctx, n.ID)
+	if err != nil {
+		return nil, internalErr(f.log.Error, "node UDP source-filter state", err)
+	}
+	if !udpFilteredAt.IsZero() {
+		resp.UdpFilteredUnix = udpFilteredAt.Unix()
+	}
 	tcpChecks, err := f.st.TCPChecks(ctx, n.ID)
 	if err != nil {
 		return nil, internalErr(f.log.Error, "node TCP port checks", err)
@@ -472,6 +477,13 @@ func (s nodeService) GetNode(ctx context.Context, req *connect.Request[adminv1.G
 			resp.Metrics = &adminv1.NodeMetrics{CpuPct: float32(m.CPUPct), SoftirqPct: float32(m.SoftirqPct), Load1: float32(m.Load1), RamUsedBytes: m.RAMUsedBytes,
 				RamTotalBytes: m.RAMTotalBytes, DiskUsedBytes: m.DiskUsedBytes, DiskTotalBytes: m.DiskTotalBytes,
 				NetRxBps: m.RxBPS, NetTxBps: m.TxBPS, AtUnix: view.MetricsAtUnix}
+			if r := m.Res; r != nil {
+				pm := resp.Metrics
+				pm.StealPct, pm.IowaitPct, pm.SwapUsedBytes, pm.SwapTotalBytes = float32(r.StealPct), float32(r.IOWaitPct), r.SwapUsed, r.SwapTotal
+				pm.ConntrackCount, pm.ConntrackMax, pm.TcpSockets, pm.UdpSockets, pm.NicSpeedMbps = r.ConntrackCount, r.ConntrackMax, r.TCPSockets, r.UDPSockets, r.NICSpeedMbps
+				pm.Agent = &adminv1.ProcessUsage{CpuPct: float32(r.AgentCPUPct), RssBytes: r.AgentRSS, GoTotalBytes: r.AgentGoTotal, GoHeapBytes: r.AgentGoHeap,
+					Goroutines: r.Goroutines, Threads: r.Threads, OpenFds: r.FDs, FdLimit: r.FDLimit}
+			}
 		}
 		resp.OnlineUsers, err = f.onlineUsers(ctx, view)
 		if err != nil {
@@ -507,6 +519,21 @@ func (s nodeService) CheckPorts(ctx context.Context, req *connect.Request[adminv
 		requested = append(requested, uint16(port))
 	}
 	out := f.checkPorts(ctx, n.ID, requested, "", true)
+	protocolOKAt, err := f.portProtocolOKAt(ctx, n, nil)
+	if err != nil {
+		return nil, internalErr(f.log.Error, "node protocol probe results", err)
+	}
+	for i := range out.checks {
+		out.checks[i].ProtocolOKAt = protocolOKAt[out.checks[i].Port]
+	}
+	udpFilteredAt, err := f.st.UDPFilteredAt(ctx, n.ID)
+	if err != nil {
+		return nil, internalErr(f.log.Error, "node UDP source-filter state", err)
+	}
+	filteredUnix := int64(0)
+	if !udpFilteredAt.IsZero() {
+		filteredUnix = udpFilteredAt.Unix()
+	}
 	var names map[string]string
 	if len(out.checks)+len(out.tcp) > 0 || out.sender != "" {
 		var err error
@@ -516,7 +543,7 @@ func (s nodeService) CheckPorts(ctx context.Context, req *connect.Request[adminv
 	}
 	rows, senderName := portCheckMessages(names, out.checks, out.sender, out.errorCode)
 	return connect.NewResponse(&adminv1.CheckPortsResponse{Ports: rows, Sender: senderName, ErrorCode: out.errorCode,
-		Tcp: tcpCheckMessages(names, out.tcp)}), nil
+		Tcp: tcpCheckMessages(names, out.tcp), UdpFilteredUnix: filteredUnix}), nil
 }
 
 func (f *Fleet) onlineUsers(ctx context.Context, view liveJSONView) ([]*adminv1.OnlineUser, error) {
@@ -561,12 +588,14 @@ func (f *Fleet) inboundMsg(n store.NodeRow, row store.FleetInboundRow) *adminv1.
 		Id: row.ID, ProfileId: row.ProfileID, ProfileName: row.ProfileName, Protocol: row.Protocol, NodeId: n.ID, NodeName: n.Name,
 		Port: uint32(row.PortOverride), TlsServerName: row.TLSNameOverride, State: inboundStateMsg(row.State), LastError: row.LastError,
 		CertPinSha256: row.CertPin, CertNotAfterUnix: fleetUnix(row.CertNotAfter), Awg: awgStatusMsg(row),
+		DirectInSubscriptions: row.DirectInSubscriptions, Enabled: row.Enabled,
 	}
 	if !row.Enabled {
 		out.State = adminv1.InboundState_INBOUND_STATE_DISABLED
 	}
 	if spec, err := f.buildSpec(n, row); err == nil {
 		out.Port, out.TlsServerName, out.Egress = uint32(spec.Listen.Port), spec.TLS.ServerName, spec.Egress
+		out.Cdn = protocols.ServerCDN(spec)
 	}
 	return out
 }
@@ -879,7 +908,7 @@ func (s nodeService) UpdateNode(ctx context.Context, req *connect.Request[adminv
 			if err != nil {
 				return nil, internalErr(f.log.Error, "update node", err)
 			}
-			if !capabilityPresent(cur.AgentCaps, capTorrentGuard) {
+			if !store.CapabilityPresent(cur.AgentCaps, capTorrentGuard) {
 				return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("agent too old"))
 			}
 		}
@@ -898,7 +927,7 @@ func (s nodeService) UpdateNode(ctx context.Context, req *connect.Request[adminv
 			if err != nil {
 				return nil, internalErr(f.log.Error, "update node", err)
 			}
-			if !capabilityPresent(cur.AgentCaps, capClientIPv6) {
+			if !store.CapabilityPresent(cur.AgentCaps, capClientIPv6) {
 				return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("agent too old"))
 			}
 		}

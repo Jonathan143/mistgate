@@ -24,6 +24,17 @@ const maxApprovalIDLen = 64
 
 type approvalRPC struct{ s *Service }
 
+// ApproveAssistantMCPPlan is the same awaiting -> approved operation used by ApprovalService.Approve, for the
+// AssistantService's human-click path. Its caller must have checked the signed-in owner and RequireStepUp first.
+func (s *Service) ApproveAssistantMCPPlan(ctx context.Context, id string, admin store.Admin) (store.MCPPlan, error) {
+	p, err := s.st.DecideMCPPlan(ctx, id, admin.ID, true, s.now())
+	if err != nil {
+		return store.MCPPlan{}, err
+	}
+	s.audit(ctx, admin.ID, "approval_approve", "ok", ClientIPFrom(ctx), map[string]any{"plan_id": p.ID, "tool": p.Tool, "token_id": p.TokenID})
+	return p, nil
+}
+
 // ApprovalHandler returns the Connect path prefix and the handler of ApprovalService. Mount it behind
 // RequireSession.
 func (s *Service) ApprovalHandler() (string, http.Handler) {
@@ -117,13 +128,14 @@ type NodeInstallSecret struct {
 	PanelKey    bool   `json:"panel_key,omitempty"`
 }
 
-func nodeInstallSecretAAD(planID string) string { return "mcp-plan-node-install:" + planID }
+// NodeInstallSecretAAD is the vault AAD for the secret the owner supplied while approving an MCP install plan.
+func NodeInstallSecretAAD(planID string) string { return "mcp-plan-node-install:" + planID }
 
 // SealNodeInstallSecret seals what the owner entered to plan planID (the approval does it; tests too).
 func SealNodeInstallSecret(v *vault.Vault, planID string, s NodeInstallSecret) []byte {
 	plain, _ := json.Marshal(s)
 	defer clear(plain)
-	return v.Seal(plain, nodeInstallSecretAAD(planID))
+	return v.Seal(plain, NodeInstallSecretAAD(planID))
 }
 
 // OpenNodeInstallSecret opens what ApproveMCPPlanWithSecret stored for plan planID.
@@ -132,7 +144,7 @@ func OpenNodeInstallSecret(v *vault.Vault, planID string, sealed []byte) (NodeIn
 	if v == nil {
 		return out, errors.New("auth: no vault")
 	}
-	plain, err := v.Open(sealed, nodeInstallSecretAAD(planID))
+	plain, err := v.Open(sealed, NodeInstallSecretAAD(planID))
 	if err != nil {
 		return out, err
 	}
@@ -211,6 +223,7 @@ func (r *approvalRPC) decide(ctx context.Context, admin store.Admin, req connect
 
 // Approve is the owner agreeing to exactly what the approval lists. Needs a step-up.
 func (r *approvalRPC) Approve(ctx context.Context, req *connect.Request[adminv1.ApproveRequest]) (*connect.Response[adminv1.ApproveResponse], error) {
+	defer func() { req.Msg.SshPassword = "" }() // sealed to the plan below; no plaintext copy outlives the call
 	admin, err := ownerSession(ctx)
 	if err != nil {
 		return nil, err

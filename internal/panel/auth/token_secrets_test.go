@@ -31,17 +31,24 @@ func TestTokenReachableResponsesCarryNoSecret(t *testing.T) {
 		"mistgate.admin.v1.PanelUpdate.url":                       "a public link to the official GitHub release",
 		"mistgate.admin.v1.ReleaseNote.url":                       "a public link to the official GitHub release",
 		"mistgate.admin.v1.NodeServerAccess.password_generated":   "a bool: whether the panel generated the saved password",
+		"mistgate.admin.v1.DnsProviderVariant.doh_url":            "a public DNS resolver endpoint from the built-in provider catalog",
+		"mistgate.admin.v1.GetBackupSettingsResponse.settings":    "owner-only settings contain metadata but never the access secret; MCP returns only a status projection",
+		"mistgate.admin.v1.BackupSettings.access_key_id":          "an access key identifier, not the secret access key",
+		"mistgate.admin.v1.BackupSettings.has_secret":             "a bool that reports whether a secret is configured",
 		// The subscription page every user sees (SubscriptionService.Get/UpdateSubscriptionSettings): names, texts and public
 		// app links, no user's link or password.
 		"mistgate.admin.v1.GetSubscriptionSettingsResponse.settings":          "the shared page's settings, checked field by field below",
 		"mistgate.admin.v1.UpdateSubscriptionSettingsResponse.settings":       "the same settings after a save",
 		"mistgate.admin.v1.SubscriptionSettings.support_url":                  "the public support link every user's page shows",
+		"mistgate.admin.v1.SubscriptionSettings.link_awg":                     "a bool controlling AWG in subscription profiles, not a key",
+		"mistgate.admin.v1.SubscriptionSettings.link_auto_select":             "a bool controlling automatic server groups in subscription profiles",
 		"mistgate.admin.v1.PlatformApp.download_url":                          "a public app download link every user's page shows",
 		"mistgate.admin.v1.PlatformApp.add_link_template":                     "a template with placeholders; the subscription URL is filled in only on the user's own page",
 		"mistgate.admin.v1.UserPageOptions.require_page_password":             "a bool: whether the pages ask for a password",
 		"mistgate.admin.v1.SubscriptionSettings.link_device_limit":            "an enum: how the device limit applies to the apps that take the link",
 		"mistgate.admin.v1.SubscriptionSettings.link_dns":                     "the DNS presets offered for the apps that take the link: preset ids",
 		"mistgate.admin.v1.GetSubscriptionSettingsResponse.shared_link_users": "a count of people, not a link",
+		"mistgate.admin.v1.GetSubscriptionSettingsResponse.link_awg_keys":     "a count of link AWG credentials, not their keys",
 		"mistgate.admin.v1.WarpAccount.peer_public_key":                       "a public key; private keys are never returned",
 		"mistgate.admin.v1.WarpAccount.has_token":                             "a bool: whether refresh is available, not a token",
 		"mistgate.admin.v1.WarpAccount.tos_url":                               "the public Cloudflare terms link",
@@ -54,6 +61,7 @@ func TestTokenReachableResponsesCarryNoSecret(t *testing.T) {
 		"mistgate.admin.v1.ListNodeServerKeysResponse.keys":                   "public SSH keys from a server's authorized_keys file; private keys are never read or returned",
 		"mistgate.admin.v1.AddNodeServerKeyResponse.key":                      "the public key just added to a server",
 		"mistgate.admin.v1.NodeServerKey.panel_key":                           "a bool marking the panel's public SSH key",
+		"mistgate.ops.v1.RetentionItem.key":                                   "the name of a retention setting (journal_days ...), not a key",
 	}
 	seen := map[protoreflect.FullName]bool{}
 	var walk func(md protoreflect.MessageDescriptor, via string)

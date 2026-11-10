@@ -104,7 +104,7 @@ const item = (over: Partial<DoctorItem> = {}): DoctorItem => ({
   ...over,
 });
 
-const cell =(over: Partial<CheckCell> = {}): CheckCell => ({ deployed: true, inboundId: "inb_1", failStreak: 0, history: [], latencyHourMs: 0, responseHourMs: 0, connectHourMs: 0, udpSentHour: 0, udpLostHour: 0, nodeSentHour: 0, nodeLostHour: 0, ...over });
+const cell =(over: Partial<CheckCell> = {}): CheckCell => ({ deployed: true, inboundId: "inb_1", failStreak: 0, history: [], latencyHourMs: 0, responseHourMs: 0, connectHourMs: 0, udpSentHour: 0, udpLostHour: 0, nodeSentHour: 0, nodeLostHour: 0, daily: [], ...over });
 const at = (status: CheckStatus, latencyMs = 0, errorCode = "") => ({ status, atUnix: 1, latencyMs, exitIp: "", exitCountry: "", errorCode, errorDetail: "", connectMs: 0, responseMs: 0, udpSent: 0, udpLost: 0 });
 
 describe("lookup", () => {
@@ -239,6 +239,21 @@ describe("alerts", () => {
     const tFa = Object.assign((key: keyof typeof en, vars?: Record<string, string | number>) => fill(dictionaries.fa[key], vars, true), { n: () => "" }) as unknown as T;
     expect(alertWhy(tFa, fmt, path)).toContain("⁨299/300⁩");
     expect(alertWhy(tFa, fmt, path)).toContain("⁨minsk1⁩");
+  });
+  it("words a filtered path_lossy alert: a filter on the way to a node that is fine, the ports that got through, no share lost", () => {
+    const params = { node: "de1", target: "fi1", target_id: "nod_fi1", ports: "2053, 8443", open: "443", sent: "300", got: "0", other: "msk1", other_got: "300", region: "other", other_region: "cis", checked_unix: "1790000000" };
+    const filtered = alert({ kind: AlertKind.PATH_LOSSY, nodeId: "nod_de1", nodeName: "de1", subject: "nod_fi1", titleKey: "health.alert.path_lossy.title", whyKey: "health.alert.path_lossy.why.filtered", params });
+    expect(alertTitle(t, filtered)).toBe("UDP filtered on the way to fi1");
+    expect(alertTitle(tRu, filtered)).toBe("Фильтр UDP по пути к fi1");
+    expect(alertWhy(t, fmt, filtered)).toBe(
+      "UDP from de1 (outside the CIS) reaches fi1 only on 443; ports 2053, 8443 get nothing, while from msk1 (CIS) everything arrives. This is a filter on the way, often the hoster’s DDoS protection against data-centre traffic: fi1 itself is fine and people on home networks usually connect, but port checks (and a relay) from de1 cannot pass.",
+    );
+    expect(alertWhy(tRu, fmtRu, filtered)).toMatch(/^От de1 \(вне СНГ\) UDP доходит до fi1 только на 443; на порты 2053, 8443 — ничего, а с msk1 \(СНГ\) доходит всё\. Это фильтр по пути, часто защита хостера от DDoS из датацентров: сама fi1 в порядке/);
+    expect(groupFact(tPlural, [filtered])).toBe("only 443 gets through");
+    // without {open} it stays a lossy line
+    const lossy = { ...filtered, whyKey: "health.alert.path_lossy.why", params: { ...params, open: "", got: "206" } };
+    expect(alertTitle(t, lossy)).toBe("Loses UDP on the way to fi1");
+    expect(groupFact(tPlural, [lossy])).toBe("31 % lost");
   });
   it("offers the mute choices up to the panel's week, «until morning» to the next 08:00", () => {
     const clock = (h: number, m = 0) => new Date(2026, 9, 1, h, m);
@@ -469,7 +484,7 @@ describe("fixErrorText", () => {
 
 // Every key the panel and the agent send has a sentence in both languages (agent.proto "CHECK IDS" and "FIX IDS").
 describe("the server's vocabulary is covered", () => {
-  const checks = ["disk_space", "journald_size", "dstate_tasks", "time_sync", "resolver", "ipv6", "foreign_vpn", "foreign_nft", "port_conflicts", "net_baseline", "cert_expiry", "memory_pressure", "cpu_softirq", "kernel_headers", "awg_backend", "warp_path", "unit_generation", "security_updates"];
+  const checks = ["disk_space", "journald_size", "dstate_tasks", "time_sync", "resolver", "ipv6", "foreign_vpn", "foreign_nft", "port_conflicts", "net_baseline", "cert_expiry", "memory_pressure", "cpu_softirq", "kernel_headers", "awg_backend", "warp_path", "unit_generation", "security_updates", "cpu_steal", "conntrack_fill", "agent_fds"];
   const fixes = ["journald_vacuum", "apply_baseline", "restart_inbound", "set_resolver", "reconnect_warp", "refresh_unit", "allow_forwarding", "enable_security_updates"];
   const errors = ["timeout", "auth", "tls", "refused", "http_status", "exit_unreachable", "client_unsupported", "node_offline", "inbound_not_active", "inbound_failed", "inbound_disabled", "inbound_pending"];
   const kinds = ["node_down", "host_blip", "no_traffic", "check_failed", "doctor_warn", "doctor_fail", "state_drift", "cert_expiry", "quota", "subscription_shared_suspect",
@@ -550,6 +565,9 @@ describe("the server's vocabulary is covered", () => {
       warp_path: ["state", "backend", "colo", "hint", "error", "inbounds"],
       unit_generation: ["unit_gen", "current"],
       security_updates: [],
+      cpu_steal: ["steal_pct", "steal_max_pct", "samples"],
+      conntrack_fill: ["count", "max", "fill_pct"],
+      agent_fds: ["fds", "limit", "used_pct"],
     };
     // what itemParams makes from them (doctor-detail.ts): the profile names and the optional pieces of a sentence
     const derived = ["profile", "profiles", "profiles_part", "server_part", "via", "colo_part", "left"];

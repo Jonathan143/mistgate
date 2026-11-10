@@ -184,6 +184,14 @@ describe("panel self-update", () => {
     expect(text()).toContain("abababababab");
     await click(button("Update panel"));
     await settle();
+    // the window first: what happens and a backup; nothing is installed before Update in it
+    expect(installPanelUpdate).not.toHaveBeenCalled();
+    const dialog = document.querySelector<HTMLElement>("[role=dialog]")!;
+    expect(dialog.textContent).toContain("Update the panel to v0.3.0");
+    expect(dialog.textContent).toContain("If the new version does not start, the panel goes back to this one by itself.");
+    expect(dialog.textContent).toContain("File on this computer");
+    await click([...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Update"));
+    await settle();
     expect(installPanelUpdate).toHaveBeenCalledWith({ expectedVersion: "v0.3.0", expectedSha256: sha });
   });
 
@@ -704,6 +712,21 @@ describe("the nodes of a rollout in progress", () => {
     );
     expect(row("nl1").textContent).toContain("Queued · canary");
     expect(row("de1").textContent).toContain("Updating…");
+  });
+
+  it("shows live download progress with accessible progress semantics", async () => {
+    await mount(
+      page({
+        nodes: [node({ nodeId: "nod_1", name: "de1", state: NodeUpdateState.UPDATING })],
+        rollout: rollout({
+          steps: [step({ nodeId: "nod_1", nodeName: "de1", state: StepState.SENT, downloadPhase: "downloading", downloadedBytes: 512, totalBytes: 1024, bytesPerSecond: 128 })],
+        }),
+      }),
+    );
+    const progress = document.querySelector<HTMLElement>('div[role="progressbar"][aria-valuenow="50"]');
+    expect(progress?.getAttribute("aria-label")).toBe("Download progress: 50%");
+    expect(progress?.textContent).toContain("50% · 128 B/s");
+    expect(progress?.textContent).toContain("512 B / 1 KiB");
   });
 
   it("subtitle a stage of one node neutrally (it is not always the next one) and a stage of several as together", async () => {

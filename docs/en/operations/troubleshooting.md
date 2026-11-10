@@ -100,7 +100,13 @@ A port inside the port-hopping range of another profile, or held by Caddy or ano
 5. The doctor's **Foreign firewall rules** and **Leftovers of other VPNs**: a foreign nat or redirect rule can swallow the traffic.
 6. The doctor's **IPv6**: an IPv6 address that cannot connect out makes sites with IPv6 records stall.
 
-If the checks are green but one person cannot connect, look at the person: their status (disabled, expired, over quota) and devices on the Users page. See [Users and groups](../guide/users-and-groups.md).
+### The checks pass, but one person's app does not work
+
+The panel's checks connect with the panel's own key, so a green check says nothing about the keys of a person's apps. Each app that fetches the subscription with a device ID gets keys of its own (see [Users and groups](../guide/users-and-groups.md)); the keys of a removed device stop working, and an app over the device limit gets only a placeholder named after the limit.
+
+1. On the person's page, look at their status (disabled, expired, over quota) and **Devices**: how many places are taken out of the limit, and which apps by link.
+2. The **24 h** line under the profile on the node's **Profiles** tab: **unknown keys** that grow while the person tries mean their app comes with a key the node does not know, from a removed device or an old subscription.
+3. Remove the old apps there, then in the app delete the subscription, add the link again and refresh it. One new device appears. Check that the app's list has no entry named after the device limit.
 
 ## The hoster blocks UDP
 
@@ -122,6 +128,24 @@ Hysteria2 and AmneziaWG run over UDP, and some hosters drop UDP on some ports or
 4. If every port is cut, write to the hoster's support or move the node.
 
 The check uses the profile's main port, not the port-hopping range, so a blocked hop range does not show here.
+
+## Works on Wi-Fi, not on mobile data
+
+**How it shows**
+
+- On Wi-Fi the app works; on mobile data it connects and stops answering a few seconds later, or never connects.
+- With AmneziaWG on mobile data the first handshake may pass, and then the app's new handshakes never reach the node; a profile on UDP 443 may get no packet at all.
+- The panel's checks and the port check pass.
+
+**What it means**
+
+The person's mobile operator cuts the traffic, not the node or the hoster: UDP to foreign addresses, QUIC, or every connection to foreign hosting after a few kilobytes. The panel cannot see it: the port check sends from data centres, and the [reachability](reachability.md) checks from the country test ICMP and TCP, not the UDP ports of AmneziaWG and Hysteria2.
+
+**What to do**
+
+1. Give the person a VLESS REALITY server over TCP 443 for mobile data: see [VLESS](../guide/vless.md).
+2. If connections to foreign hosting freeze after a few kilobytes, add a [relay](../guide/relays.md) through an entry node in the person's country. It carries VLESS and Hysteria2, not AmneziaWG yet; under a mobile whitelist it helps only if the entry address is on the list.
+3. Another UDP port or another AmneziaWG mimicry preset sometimes helps. The obfuscation parameters rarely do: the operator cuts the flow, not a signature.
 
 ## The clock drifts
 
@@ -230,3 +254,39 @@ Start-up errors of `mistgate serve` and what they mean:
 | `vault: … is accessible to group or others …; run chmod 600 on it` | Run `chmod 600` on the key file. |
 | `--admin-listen conflicts with the stored admin address …` | The installation was set up for a secret host or prefix; drop `--admin-listen`. |
 | `--tls-cert and --tls-key go together` | Give both or neither. |
+
+## Panel logs, retention, export and metrics
+
+On the VPS edition the owner finds these in **Settings → System**; an admin-profile token reads them through MCP (`panel_logs`, `retention_status`, `log_level_plan`, `retention_plan`).
+
+- **Panel resources.** Settings → System → **Panel resources** shows what the panel itself costs its server: its process (CPU in percent of the whole server, memory with the Go heap, open files against the limit, goroutines and threads, how long it has run), the server (CPU busy with steal and disk wait, load, memory, swap, the disk of the data directory), the database (its size with the write-ahead log, and how much of it is free pages), the agents connected and the admin API's last 5 minutes (requests, server errors, the 95th-percentile response time). Every admin sees it, and any token reads it through MCP (`panel_resources`). The database is measured at most once a minute.
+
+- **Log level.** `mistgate serve --log-level debug|info|warn|error` (or `MISTGATE_LOG_LEVEL`, default `info`) sets the level at start, and `--log-format json` (or `MISTGATE_LOG_FORMAT`) writes the log to stderr as JSON. The owner can change the level while the panel runs; a restart returns to the configured one.
+- **Panel logs.** The last 5000 records at the current level are kept in memory (lost on restart) and shown, with filters for level, time, text, part of the panel, error code and request code. Addresses, the panel's secret names and key-shaped values are removed from every record, and only allow-listed attributes are shown. Every warning and error the panel writes carries a short `code`.
+- **Request code.** A failed call in the admin shows "request code abc12345". The same code is in the response header `X-Request-Id`, in the log records of that request and in the audit row of a change it made, so a person who quotes it and an operator reading the logs talk about the same request. The Cloudflare edition does not stamp request codes.
+- **Retention.** Settings → System → Retention sets how long each table the hourly sweep prunes keeps its rows: the node journal (1 to 7 days, default 7), info events (90) and warning and error events (400), the audit log (30 to 1095, default 400), resolved alerts (90), raw check rounds (25 to 168 hours, default 25), daily check aggregates (90), the hourly host load of a node (90), and the hourly traffic per person and per node (400 days each). A shorter time deletes the older rows at the next sweep, for good, and asks for a step-up. The sweep reads the values on every edition; they can be changed on the VPS edition.
+- **Export.** Settings → System → Export downloads the events, the audit log, the nodes' saved journal and the panel's own logs of a window of up to 31 days as newline-delimited JSON (one object per line, a `source` field names the kind). Every row is cleaned like the panel logs, and client addresses are left out of the audit rows. It asks for a step-up.
+- **Metrics.** `/metrics` on the admin address serves fleet gauges in the OpenMetrics text format: nodes by status, people online, active alerts by severity, deployed checks by latest result, per-node download and upload speed and CPU, relays by state, and the panel process's resident memory (`process_resident_memory_bytes`), goroutines (`go_goroutines`) and database size (`mistgate_db_bytes`). No person's name and no address. It is off until the owner turns it on in Settings → System; that makes a token, shown once and stored only as a hash, and a scraper sends it as `Authorization: Bearer <token>`. While it is off the address answers as any unknown admin path does.
+
+## Debug capture of one node
+
+When a node misbehaves and its warnings are not enough, the owner can ask it to log in detail for a few minutes. On the node's page, **Server → Debug capture**, pick the sources (the agent, `hysteria2`, `vless`, `xray`, `awg`, `update`, `kernel`; none picked means all), the level (debug or info) and the length (1, 5, 10 or 15 minutes), then press **Debug for N min**. A countdown shows the time left; **Stop and show** ends it at once. When the time is up the node sends what it kept and the panel shows the records with filters for level, source and text. The `kernel` source reads the node's kernel log from 30 minutes before capture start through the end; firewall packet-log lines are counted in its summary and not kept. On a kernel-backend node, `awg` turns on the module's debug output during the capture and adds a summary of handshake initiations without a response within five seconds.
+
+- **Limits.** One capture per node at a time, at most 15 minutes, at most 20000 records and 4 MiB (what does not fit is counted, not kept). The node puts its log level back when the capture ends, and a restart of the agent ends it too: nothing is written to disk on the node. The panel keeps a capture and its records 24 hours and at most 5 captures per node; the hourly sweep deletes the rest (VPS edition only).
+- **What is in it.** Every record is cleaned on the node (client addresses become `<ip>`, key-shaped text is removed, host names are cut from xray's lines, and only the node journal's short list of attributes is kept), again when the panel stores it, and once more when it is read, with the panel's secret names removed. Debug lines of the chosen sources go only to the capture, not to the node's own log.
+- **Who and what is recorded.** The owner starts and stops a capture in the admin. An admin-profile token starts one with `node_debug_capture_plan` / `node_debug_capture_apply` and reads it with `node_debug_logs` (a capture or a node, filters `min_level`, `source`, `query`, `limit`, `cursor`). Every start is in the audit log with who asked, the node, the sources and the duration. An agent that is too old (it does not list `debug/1`) and a node that is offline are refused without anything being sent. The Cloudflare edition does not have it.
+
+## Multipath TCP and CVE-2026-98432
+
+CVE-2026-98432 is a flaw in the Linux kernel's IPv4 TCP (CVSS 9.8) that was shown as remote root through a listener that accepts Multipath TCP (MPTCP). Go opens every listener with MPTCP by default since Go 1.24, so the panel, the node agent and the Xray listeners it hosts accepted it up to v0.1.82. From v0.1.83 they open plain TCP, which nothing in Mistgate needs to change: clients that ask for MPTCP fall back to TCP.
+
+The bug itself is in the kernel, so on every node and on the panel's server also:
+
+1. Turn MPTCP off for every program on the host, Caddy and other Go programs included, and keep it off after a reboot:
+
+   ```bash
+   echo 'net.mptcp.enabled = 0' | sudo tee /etc/sysctl.d/99-no-mptcp.conf && sudo sysctl -w net.mptcp.enabled=0
+   ```
+
+2. Restart what listens (`sudo systemctl restart mistgate-node` on a node, `mistgate` on the panel's server, and Caddy where it runs): sockets opened before the change keep MPTCP until then. `ss -Hl -M` lists the MPTCP listeners that are left.
+3. Install your distribution's patched kernel as soon as it is published, and reboot.

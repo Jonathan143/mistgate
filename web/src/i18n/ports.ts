@@ -29,7 +29,16 @@ export const en = {
   "ports.row.run": "from {sender} {count}",
   "ports.blame.path": "The port is fine: packets get lost on the way from {sender} ({region}).",
   "ports.blame.pathPlain": "The port is fine: packets get lost on the way from {sender}.",
+  // the sender's path is filtered (udpFilters in src/lib/port-check.ts): some ports arrive whole, the rest get nothing; {node} is this node
+  "ports.blame.filtered": "The port is fine: UDP from {sender} is filtered on the way.",
+  "ports.filter": "From {sender}, UDP arrives only on {open}: a filter on the way (often the hoster’s DDoS protection). Port checks from {sender} do not pass; this is not {node} breaking, and people on home networks usually connect.",
   "ports.blame.node": "Lost from both sides: this node’s port loses packets.",
+  // the test datagrams are lost while the panel's own protocol check through the port passes (testBlocked in src/lib/port-check.ts);
+  // {protocols} is "AmneziaWG" or "Hysteria2, TUIC"
+  "ports.testBlocked": "Test blocked",
+  "ports.blame.blocked": "The {protocols} check through this port passes: the hoster’s filter likely cuts the test packets, not people.",
+  // both senders got only UDP 443 through (GetNodeResponse.udp_filtered_unix): the node's own hoster filters; it replaces the sender captions
+  "ports.filter.hoster": "This node’s hoster lets only UDP 443 through from our nodes, so port checks say little here. The panel recruits no new senders for it and rechecks once a day.",
   "ports.region.cis": "CIS",
   "ports.region.other": "outside the CIS",
 
@@ -92,6 +101,8 @@ export const en = {
   "event.port_lossy.confirmed": "UDP to port {port} of “{profile}” loses packets from both sides: {lost} % from {sender}, {confirm_lost} % from {confirm_sender}",
   // the node is the sender whose packets get lost; {arrived} is "299/300" of the other sender
   "event.path_lossy": "UDP to {target} gets lost on the way: {lost} % on ports {ports}, while {arrived} arrive from {other}",
+  // a filter on the way, not a lossy line: {open} got through whole, the other ports nothing
+  "event.path_lossy.filtered": "UDP to {target} is filtered on the way: only {open} gets through, ports {ports} get nothing, while everything arrives from {other}",
 
   // the audit trail
   "audit.node.ports_check": "checked UDP delivery on {node}: ports {ports}",
@@ -127,7 +138,12 @@ export const ru: typeof en = {
   "ports.row.run": "с {sender} {count}",
   "ports.blame.path": "Порт в порядке: пакеты теряются по пути от {sender} ({region}).",
   "ports.blame.pathPlain": "Порт в порядке: пакеты теряются по пути от {sender}.",
+  "ports.blame.filtered": "Порт в порядке: UDP с {sender} режет фильтр по пути.",
+  "ports.filter": "С {sender} UDP доходит только на {open} — по пути фильтр (часто защита хостера от DDoS). Проверки портов с {sender} не проходят; это не поломка {node}, люди из домашних сетей обычно подключаются.",
   "ports.blame.node": "Теряются с обеих сторон: пакеты теряет порт этой ноды.",
+  "ports.testBlocked": "Тест не проходит",
+  "ports.blame.blocked": "Проверка {protocols} через этот порт проходит: похоже, фильтр хостера режет тестовые пакеты, а не людей.",
+  "ports.filter.hoster": "Хостер этой ноды пропускает от наших нод только UDP 443 — проверка портов не показательна. Новых отправителей панель не берёт, повтор — раз в сутки.",
   "ports.region.cis": "СНГ",
   "ports.region.other": "вне СНГ",
 
@@ -181,6 +197,7 @@ export const ru: typeof en = {
   "event.port_lossy": "UDP до порта {port} профиля «{profile}» теряет {lost} % пакетов (проверка с {sender})",
   "event.port_lossy.confirmed": "UDP до порта {port} профиля «{profile}» теряется с обеих сторон: {lost} % с {sender}, {confirm_lost} % с {confirm_sender}",
   "event.path_lossy": "UDP до {target} теряется по пути: {lost} % на портах {ports}, а с {other} доходит {arrived}",
+  "event.path_lossy.filtered": "UDP до {target} режет фильтр по пути: доходит только {open}, на порты {ports} — ничего, а с {other} доходит всё",
 
   "audit.node.ports_check": "проверил(а) доставку UDP на {node}: порты {ports}",
   "audit.node.ipv6_check": "проверил(а) снаружи IPv6-адрес {address} ноды {node}: отвечает",
@@ -215,7 +232,12 @@ export const zh: typeof en = {
   "ports.row.run": "来自 {sender} {count}",
   "ports.blame.path": "端口正常：数据包在从 {sender}（{region}）发出的路上丢失。",
   "ports.blame.pathPlain": "端口正常：数据包在从 {sender} 发出的路上丢失。",
+  "ports.blame.filtered": "端口正常：来自 {sender} 的 UDP 在途中被过滤。",
+  "ports.filter": "来自 {sender} 的 UDP 只有 {open} 能到达：路径上有过滤（常见于服务商的 DDoS 防护）。来自 {sender} 的端口检测无法通过；这不是 {node} 的故障，家庭网络的用户通常能连接。",
   "ports.blame.node": "两边都丢包：是此节点的端口在丢包。",
+  "ports.testBlocked": "测试被拦截",
+  "ports.blame.blocked": "通过此端口的 {protocols} 检测正常：看起来是服务商的过滤拦截了测试包，而不是用户。",
+  "ports.filter.hoster": "此节点的服务商只放行来自我们节点的 UDP 443，端口检测参考价值不大。面板不再为它挑选新的发送节点，每天复查一次。",
   "ports.region.cis": "独联体",
   "ports.region.other": "独联体以外",
 
@@ -269,6 +291,7 @@ export const zh: typeof en = {
   "event.port_lossy": "「{profile}」端口 {port} 的 UDP 丢包 {lost}%（由 {sender} 检测）",
   "event.port_lossy.confirmed": "「{profile}」端口 {port} 的 UDP 两边都丢包：来自 {sender} 丢失 {lost}%，来自 {confirm_sender} 丢失 {confirm_lost}%",
   "event.path_lossy": "发往 {target} 的 UDP 在途中丢失：端口 {ports} 丢包 {lost}%，而来自 {other} 的到达 {arrived}",
+  "event.path_lossy.filtered": "发往 {target} 的 UDP 在途中被过滤：只有 {open} 能到达，端口 {ports} 完全收不到，而来自 {other} 的全部到达",
 
   "audit.node.ports_check": "检测了 {node} 的 UDP 到达情况：端口 {ports}",
   "audit.node.ipv6_check": "从外部检测了 {node} 的 IPv6 地址 {address}：有响应",
@@ -301,7 +324,12 @@ export const fa: typeof en = {
   "ports.row.run": "از {sender} {count}",
   "ports.blame.path": "پورت سالم است: بسته‌ها در مسیر از {sender} ({region}) گم می‌شوند.",
   "ports.blame.pathPlain": "پورت سالم است: بسته‌ها در مسیر از {sender} گم می‌شوند.",
+  "ports.blame.filtered": "پورت سالم است: UDP از {sender} در مسیر فیلتر می‌شود.",
+  "ports.filter": "از {sender} فقط روی {open} UDP می‌رسد: فیلتری در مسیر است (اغلب محافظت DDoS سرویس‌دهنده). بررسی پورت‌ها از {sender} رد نمی‌شود؛ این خرابی {node} نیست و کاربران شبکه‌های خانگی معمولاً وصل می‌شوند.",
   "ports.blame.node": "از هر دو طرف گم می‌شوند: پورت همین نود بسته از دست می‌دهد.",
+  "ports.testBlocked": "آزمایش مسدود است",
+  "ports.blame.blocked": "بررسی {protocols} از این پورت موفق است: به نظر می‌رسد فیلتر سرویس‌دهنده بسته‌های آزمایشی را قطع می‌کند، نه کاربران را.",
+  "ports.filter.hoster": "سرویس‌دهندهٔ این نود از نودهای ما فقط UDP 443 را عبور می‌دهد، پس بررسی پورت‌ها چیز زیادی نمی‌گوید. پنل فرستندهٔ تازه‌ای برایش نمی‌گیرد و روزی یک بار دوباره بررسی می‌کند.",
   "ports.region.cis": "کشورهای مشترک‌المنافع",
   "ports.region.other": "بیرون از کشورهای مشترک‌المنافع",
   "ports.tcp.ours": "به Mistgate می‌رسد",
@@ -347,6 +375,7 @@ export const fa: typeof en = {
   "event.port_lossy": "UDP تا پورت {port} پروفایل «{profile}» {lost}% از بسته‌ها را از دست می‌دهد (بررسی از {sender})",
   "event.port_lossy.confirmed": "UDP تا پورت {port} پروفایل «{profile}» از هر دو طرف بسته گم می‌کند: {lost}% از {sender}، {confirm_lost}% از {confirm_sender}",
   "event.path_lossy": "UDP تا {target} در مسیر گم می‌شود: {lost}% روی پورت‌های {ports}، در حالی که از {other} {arrived} می‌رسد",
+  "event.path_lossy.filtered": "UDP تا {target} در مسیر فیلتر می‌شود: فقط {open} می‌رسد، به پورت‌های {ports} هیچ چیز نمی‌رسد، در حالی که از {other} همه می‌رسد",
   "audit.node.ports_check": "تحویل UDP روی {node} را بررسی کرد: پورت‌های {ports}",
   "audit.node.ipv6_check": "آدرس IPv6 {address} نود {node} را از بیرون بررسی کرد: جواب می‌دهد",
   "audit.node.ipv6_check.fail": "آدرس IPv6 {address} نود {node} را از بیرون بررسی کرد: مثل نود جواب نمی‌دهد",
@@ -378,7 +407,12 @@ export const tr: typeof en = {
   "ports.row.run": "{sender} tarafından {count}",
   "ports.blame.path": "Port sağlam: paketler {sender} ({region}) ile bu düğüm arasındaki yolda kayboluyor.",
   "ports.blame.pathPlain": "Port sağlam: paketler {sender} ile bu düğüm arasındaki yolda kayboluyor.",
+  "ports.blame.filtered": "Port sağlam: {sender} kaynaklı UDP yolda filtreleniyor.",
+  "ports.filter": "{sender} düğümünden UDP yalnızca {open} üzerinden ulaşıyor: yolda bir filtre var (çoğu zaman sağlayıcının DDoS koruması). {sender} düğümünden port kontrolleri geçmiyor; bu {node} düğümünün arızası değil, ev ağlarındaki kişiler genellikle bağlanır.",
   "ports.blame.node": "İki taraftan da kayıp var: paketleri bu düğümün portu kaybediyor.",
+  "ports.testBlocked": "Test engelleniyor",
+  "ports.blame.blocked": "Bu porttan {protocols} kontrolü geçiyor: sağlayıcının filtresi kişileri değil, test paketlerini kesiyor gibi görünüyor.",
+  "ports.filter.hoster": "Bu düğümün sağlayıcısı düğümlerimizden yalnızca UDP 443'ü geçiriyor, bu yüzden port kontrolleri pek bir şey söylemiyor. Panel bu düğüm için yeni gönderici almıyor, günde bir kez yeniden kontrol ediyor.",
   "ports.region.cis": "BDT",
   "ports.region.other": "BDT dışı",
   "ports.tcp.ours": "Mistgate'e ulaşıyor",
@@ -424,6 +458,7 @@ export const tr: typeof en = {
   "event.port_lossy": "“{profile}” profilinin {port} portuna giden UDP paketlerinin %{lost} kadarı kayboluyor ({sender} tarafından kontrol edildi)",
   "event.port_lossy.confirmed": "“{profile}” profilinin {port} portuna giden UDP iki taraftan da kayboluyor: {sender} tarafından %{lost}, {confirm_sender} tarafından %{confirm_lost}",
   "event.path_lossy": "{target} düğümüne giden UDP yolda kayboluyor: {ports} portlarında %{lost}, oysa {other} tarafından gönderilenlerden {arrived} ulaşıyor",
+  "event.path_lossy.filtered": "{target} düğümüne giden UDP yolda filtreleniyor: yalnızca {open} ulaşıyor, {ports} portlarına hiçbir şey ulaşmıyor, oysa {other} tarafından gönderilenlerin hepsi ulaşıyor",
   "audit.node.ports_check": "{node} düğümünde UDP iletimini kontrol etti: portlar {ports}",
   "audit.node.ipv6_check": "{node} düğümünün {address} IPv6 adresini dışarıdan kontrol etti: yanıt veriyor",
   "audit.node.ipv6_check.fail": "{node} düğümünün {address} IPv6 adresini dışarıdan kontrol etti: adres düğüm olarak yanıt vermiyor",

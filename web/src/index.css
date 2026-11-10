@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./fonts/fonts.css";
 @import "./assets/mark-motion.css";
+@import "./components/graph/graph.css";
 
 /*
  * Design tokens. This is the ONE place colours, radii, type and
@@ -292,8 +293,31 @@
     transform: rotate(360deg);
   }
 }
+/* a page opening: the whole screen settles in at once, short and quiet, from the first frame (no blank flash, no tile
+   popping in after another) */
+@keyframes mg-page-in {
+  from {
+    opacity: 0.35;
+    transform: translateY(3px);
+  }
+}
 .screen-enter {
-  animation: mg-ui-in 0.45s var(--ease-out-soft) both;
+  animation: mg-page-in 0.2s var(--ease-out-soft) both;
+}
+/* "Loading…" only when the wait is long enough to notice: a fast load never flashes it */
+@keyframes mg-show {
+  from {
+    opacity: 0;
+  }
+}
+.pending-delay {
+  animation: mg-show 0.16s ease-out 0.22s both;
+}
+/* a list that was waited for appears as one, not row by row */
+@keyframes mg-list-in {
+  from {
+    opacity: 0;
+  }
 }
 /* the line of a node's ways in draws itself from people down to the node, once */
 @keyframes mg-ways-draw {
@@ -318,12 +342,72 @@
   border-color: var(--accent-line);
 }
 
+/* The Nodes page's bulk bar (screens/nodes-bulk.tsx) floats where the dock is: on a phone it takes the dock's place, on a
+   desktop the toasts move up above it. */
+@media (width < 45rem) {
+  body:has([data-bulk-bar]) [data-dock] {
+    visibility: hidden;
+  }
+}
+@media (width >= 45rem) {
+  body:has([data-bulk-bar]) [data-toast-viewport] {
+    bottom: 92px;
+  }
+}
+
 /* horizontally scrollable strips (settings sub-nav) without a visible scrollbar */
 .no-scrollbar {
   scrollbar-width: none;
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* a quiet scroll area (ScrollFade): a thin scrollbar that shows on hover or focus, and a soft fade at an edge only while
+   there is more beyond it */
+@property --fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.scroll-soft {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%);
+  transition:
+    --fade-top 0.18s ease,
+    --fade-bottom 0.18s ease,
+    scrollbar-color 0.2s ease;
+}
+.scroll-soft[data-top="1"] {
+  --fade-top: 22px;
+}
+.scroll-soft[data-bottom="1"] {
+  --fade-bottom: 28px;
+}
+.scroll-soft:hover,
+.scroll-soft:focus-visible {
+  scrollbar-color: color-mix(in oklch, var(--muted) 45%, transparent) transparent;
+}
+.scroll-soft:focus-visible {
+  outline: none;
+}
+.scroll-soft::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll-soft::-webkit-scrollbar-thumb {
+  border-radius: 99px;
+  background: transparent;
+}
+.scroll-soft:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -334,6 +418,124 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* JSON colouring of a tool call's input: keys, strings, numbers, words; readable in both themes */
+:root {
+  --json-key: var(--accent-sky);
+  --json-str: var(--accent-mint);
+  --json-num: var(--accent-sand);
+  --json-lit: var(--accent-rose);
+}
+:root[data-theme="light"] {
+  --json-key: color-mix(in oklch, var(--accent-sky) 45%, #000);
+  --json-str: color-mix(in oklch, var(--accent-mint) 45%, #000);
+  --json-num: color-mix(in oklch, var(--accent-sand) 40%, #000);
+  --json-lit: color-mix(in oklch, var(--accent-rose) 45%, #000);
+}
+
+/* The assistant's open button: an accent gradient with a soft glow, a hairline highlight, lifts on hover, presses in. */
+.chat-fab {
+  background: linear-gradient(150deg, color-mix(in oklch, var(--accent) 80%, #fff), var(--accent) 52%, color-mix(in oklch, var(--accent) 82%, #5b4bd0));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.4),
+    0 8px 22px -6px color-mix(in oklch, var(--accent) 65%, transparent),
+    0 2px 6px rgb(0 0 0 / 0.18);
+  transition:
+    transform 0.2s ease-out,
+    box-shadow 0.2s ease;
+}
+.chat-fab:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    0 12px 28px -6px color-mix(in oklch, var(--accent) 80%, transparent),
+    0 3px 8px rgb(0 0 0 / 0.2);
+}
+.chat-fab:active {
+  transform: scale(0.96);
+}
+.chat-fab:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+@keyframes mg-ring {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+.chat-fab-ring {
+  animation: mg-ring 1.6s ease-out infinite;
+}
+
+/* a new message or tool row: fades in with a 4px rise */
+@keyframes mg-chat-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.chat-in {
+  animation: mg-chat-in 0.16s ease-out both;
+}
+
+/* The assistant chat's typing dots: three dots that rise in turn; still and half-lit with reduced motion. */
+@keyframes mg-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+.chat-dot {
+  animation: mg-typing 1.2s ease-in-out infinite;
+}
+.chat-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.chat-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-dot {
+    animation: none !important;
+    opacity: 0.6;
+  }
+}
+
+/* A word of an answer as it streams in (useSmoothText in components/assistant/markdown.tsx): from clear and a little soft to
+   sharp. Only the words that just arrived are animating at any moment. */
+@keyframes mg-word-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+.chat-word {
+  animation: mg-word-in 0.45s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-word {
+    animation: none;
   }
 }
 
@@ -397,4 +599,12 @@
 [dir="rtl"] pre {
   direction: ltr;
   text-align: left;
+}
+
+/* a screen's list rows on their first data: a fade with a 4px rise (components/fx/page.tsx) */
+@keyframes mg-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }

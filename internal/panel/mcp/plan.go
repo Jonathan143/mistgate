@@ -1,3 +1,5 @@
+//go:build !js
+
 package mcp
 
 import (
@@ -316,7 +318,19 @@ func (e *env) createPlan(c *call, tool string, params []byte, reason string, pl 
 
 func (e *env) audit(c *call, action string, params map[string]any, result string) {
 	if e.cfg.Audit != nil {
-		e.cfg.Audit(context.WithoutCancel(c.ctx), AuditEntry{Actor: "mcp:" + c.tokenID, Action: action, Params: params, Result: result})
+		actor, source := "mcp:"+c.tokenID, "mcp"
+		if c.assistant != nil {
+			who := c.assistant.AdminName
+			if who == "" {
+				who = c.assistant.AdminID
+			}
+			actor = "Assistant of " + who
+			if c.assistant.Scheduled {
+				actor = "Scheduled tasks of " + who
+			}
+			source = "assistant"
+		}
+		e.cfg.Audit(context.WithoutCancel(c.ctx), AuditEntry{Actor: actor, Action: action, Params: params, Result: result, Source: source})
 	}
 }
 

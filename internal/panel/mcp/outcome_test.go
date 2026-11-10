@@ -1,3 +1,5 @@
+//go:build !js
+
 package mcp
 
 import (
@@ -123,6 +125,16 @@ func TestFactsAndOutcomesCarryCodes(t *testing.T) {
 	}
 	if f := factOf(t, p, "duration"); f.Code != "seconds" || f.Params["n"] != "3600" {
 		t.Errorf("duration: %+v", f)
+	}
+
+	// alert_close: the alert by kind and severity; the outcome has no params
+	p = planOf(t, s, "alert_close", map[string]any{"alert_id": "alr_1"})
+	if f := factOf(t, p, "alert"); f.Code != "alert" || f.Params["kind"] != "node_down" || f.Params["severity"] != "critical" {
+		t.Errorf("alert: %+v", f)
+	}
+	applyOf(t, s, "alert_close", p.ConfirmToken)
+	if pl := storedPlan(t, e, p.PlanID); pl.OutcomeCode != "alert_closed" {
+		t.Errorf("outcome: %q", pl.OutcomeCode)
 	}
 
 	// node_fix: the fix id is the code; a restart names its profile, as an untrusted param

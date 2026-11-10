@@ -20,6 +20,7 @@ var transactionShape1 = map[string]string{
 	"admin.go:ConsumeRecoveryToken":                  "A single live, unused-token UPDATE RETURNING spends the recovery token atomically.",
 	"admin.go:PutSetupToken":                         "Replaces unused setup tokens and inserts the latest in one fixed batch.",
 	"access_user.go:CreateUser":                      "Inserts the user, selected nodes, and optional shared device credentials in one fixed batch.",
+	"access_user.go:DeleteUsers":                     "Deletes the user's network rows and the user in one fixed batch.",
 	"access_profile.go:CreateInbound":                "Inserts the inbound and clears its retained key in one fixed batch.",
 	"access_profile.go:CreateGroup":                  "Computes an automatic color in the insert and replaces the profile set in one fixed batch.",
 	"batch_native.go:runSQLBatch":                    "Runs one SQL transaction on the explicitly selected reader or writer pool.",
@@ -37,6 +38,11 @@ var transactionShape1 = map[string]string{
 	"port_check.go:PutTCPChecks":                     "Deletes a node's TCP check rows and inserts the new ones in one fixed batch.",
 	"udp_path_loss.go:PutPortChecksAndUDPPathLosses": "Saves per-port verdicts and changes their path-loss rows together in one fixed batch.",
 	"udp_path_loss.go:UpdateUDPPathLosses":           "Deletes cleared sender-to-target losses and upserts current path losses in one fixed batch.",
+	"path_probe.go:AddNodeTrace":                     "Inserts the trace and drops the pair's traces beyond the newest 20 in one fixed batch.",
+	"path_probe.go:AddNodeDNSRun":                    "Inserts the resolver run and drops the node's runs beyond the newest 24 in one fixed batch.",
+	"debug_capture.go:BeginDebugCapture":             "A running-capture check precedes one fixed batch: drop the node's oldest captures and their lines, insert the new one.",
+	"debug_capture.go:appendDebugLines":              "The capture's lines and counters share one fixed batch; sequenced reports guard the last accepted chunk so retries do not store it twice.",
+	"debug_capture.go:PruneDebugCaptures":            "The old captures' lines and the captures themselves are deleted in one fixed batch.",
 	"relay.go:RelaysApplied":                         "The reported forwards of one entry update their rows (switched-on relays of that node only) in one fixed batch.",
 	"relay_check.go:SetRelayCounters":                "Updates each enabled relay owned by the reporting entry in one fixed batch.",
 	"provision.go:FinishCancelledNodeProvisionJob":   "The cancellation event and guarded state transition run in one fixed batch.",
@@ -44,10 +50,22 @@ var transactionShape1 = map[string]string{
 	"provision.go:createNodeProvisionJob":            "The job insert and optional queued event run in one fixed batch.",
 	"store.go:SetSettingsIfAbsent":                   "Inserts each missing setting and reads the stored values back in one batch.",
 	"store.go:SetSettings":                           "Upserts the supplied settings in one fixed batch.",
+	"store.go:SetAndDeleteSettings":                  "Retention upserts and resets run in the same fixed atomic batch.",
+	"network_hour.go:SaveNetworkMode":                "The mode change and any network-row deletion required by it run in one fixed batch.",
 	"access_linkmode.go:SaveSubscriptionSettings":    "The settings upserts, the mode and, for STRICT, the revoke of every shared device run in one fixed batch.",
 	"telegram.go:ClearTelegramBot":                   "Deletes links, pending link codes, and the bot as one fixed batch.",
 	"telegram.go:UnlinkTelegram":                     "Deletes the chat link and pending link code as one fixed batch.",
 	"token.go:RevokeAPIToken":                        "Revokes the token and cancels its open plans in one fixed batch.",
+	"assistant.go:DeleteAssistantConversation":       "A fixed batch cancels a conversation's MCP plans and deletes its assistant plans, messages, follow-ups, and parent row together.",
+	"assistant.go:DeleteAssistantConversations":      "A fixed batch cancels MCP plans and deletes selected conversations and their plan, message and follow-up rows together.",
+	"assistant.go:RetainAssistantConversations":      "A fixed batch cancels expired MCP plans and deletes expired conversations and their plan, message and follow-up rows together.",
+	"assistant_follow_up.go:ArmAssistantFollowUps":   "Follow-ups of applied plans get their time and those of plans that ended otherwise go, in one fixed batch.",
+	"assistant.go:ReconcileAssistantBudget":          "Usage is added only for a live reservation, then that reservation is deleted in one fixed batch.",
+	"assistant.go:SaveAssistantSettings":             "Provider choices and shared assistant settings are saved in one batch.",
+	"token.go:RevokeAssistantToken":                  "The hidden identity is revoked and its pending MCP plans are cancelled in one fixed batch.",
+	"scheduled_task.go:DeleteScheduledTask":          "A task's runs and the task are deleted in one fixed batch.",
+	"scheduled_task.go:RecoverScheduledRuns":         "Runs left running are marked interrupted and every lease is given back in one fixed batch.",
+	"scheduled_task.go:PruneScheduledTaskRuns":       "Old and surplus runs and the matching messages and plan cards of task conversations are deleted in one fixed batch.",
 }
 
 var transactionShape2 = map[string]string{
@@ -57,6 +75,7 @@ var transactionShape2 = map[string]string{
 	"access_telegram.go:RotateTelegramKey":           "A guarded batch retries if the live Telegram credential it replaces was revoked or replaced meanwhile.",
 	"access_awg.go:RotateAWGDevice":                  "A guarded batch retries if the live credential, selected peer, or profile epoch changed.",
 	"access_awg.go:EnsureLinkAWGCreds":               "Guarded batches retry when the link device, its adoption, the device ceiling, profile epoch, or candidate peer allocation changed.",
+	"access_awg.go:RevokeLinkAWGCreds":               "A link-device and credential-count guard precedes AWG peer quarantine and credential revocation in one atomic batch.",
 	"access_linkdevice.go:EnsureLinkDevice":          "A guarded batch retries when the device appeared, was adopted, was revoked, or the device ceiling was reached by another writer.",
 	"access_user.go:revokeDevice":                    "A live-device guard precedes device, peer, and credential updates plus a returning user lookup.",
 	"access_linkmode.go:UnblockDevice":               "A blocked-device guard precedes the unblock and a returning user lookup.",
@@ -99,11 +118,14 @@ var transactionShape2 = map[string]string{
 	"update.go:AddNodeToRunningRollout":              "A current-rollout guard precedes stage shifting, insertion, and schedule consumption.",
 	"update.go:createRollout":                        "One SQL guard checks the rollout id, active slot, and optional exact schedule before fixed writes.",
 	"warp.go:ReplaceWarpAccount":                     "An account-exists guard precedes the delete and replacement insert.",
+	"scheduled_task.go:ClaimScheduledTask":           "A free-lease (and manual cooldown) compare-and-swap takes the lease; the run row is inserted only if that lease holds.",
+	"scheduled_task.go:FinishScheduledRun":           "The run row is updated; the task's outcome update is a compare-and-swap on the run's own lease.",
 }
 
 var transactionShape3 = map[string]string{
-	"fleet_node.go:NodeApplied": "The node row, guarded live drift update, and json_each inbound results commit in one fixed three-statement batch.",
-	"fleet_stats.go:SkipSeq":    "Writes only inside a transaction; D1 stages the sequence update and commits it as one batch.",
+	"fleet_node.go:NodeApplied":                                  "The node row, guarded live drift update, and json_each inbound results commit in one fixed three-statement batch.",
+	"fleet_stats.go:SkipSeq":                                     "Writes only inside a transaction; D1 stages the sequence update and commits it as one batch.",
+	"scheduled_task_timezone.go:SetSettingAndScheduledTaskNexts": "The schedule offset and enabled tasks' next runs change in one batch.",
 }
 
 func TestTransactionCallSitesClassified(t *testing.T) {

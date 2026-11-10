@@ -1,6 +1,9 @@
+//go:build !js
+
 package mcp
 
 import (
+	"math"
 	"time"
 
 	adminv1 "github.com/mistgate/mistgate/gen/mistgate/admin/v1"
@@ -110,12 +113,14 @@ func fleetStatusView(r *adminv1.OverviewResponse) *FleetStatusV {
 // node_get, node_metrics
 
 type inboundV struct {
-	ID        string `json:"id"`
-	Profile   string `json:"profile"`
-	Protocol  string `json:"protocol"`
-	Port      uint32 `json:"port"`
-	State     string `json:"state"`
-	LastError string `json:"last_error,omitempty"`
+	ID                    string `json:"id"`
+	Profile               string `json:"profile"`
+	Protocol              string `json:"protocol"`
+	Port                  uint32 `json:"port"`
+	State                 string `json:"state"`
+	LastError             string `json:"last_error,omitempty"`
+	DirectInSubscriptions bool   `json:"direct_in_subscriptions"`
+	CDN                   bool   `json:"cdn"`
 }
 
 type onlineUserV struct {
@@ -213,6 +218,7 @@ func nodeGetView(r *adminv1.GetNodeResponse) *NodeGetV {
 		v.Inbounds = append(v.Inbounds, inboundV{
 			ID: in.GetId(), Profile: nm(in.GetProfileName()), Protocol: clean(in.GetProtocol(), 40), Port: in.GetPort(),
 			State: enumName("INBOUND_STATE_", in.GetState().String()), LastError: clean(in.GetLastError(), 200),
+			DirectInSubscriptions: in.GetDirectInSubscriptions(), CDN: in.GetCdn(),
 		})
 	}
 	// one row per person, protocol and device: the node reports each connection, each with the person's whole rate
@@ -305,25 +311,33 @@ func warpStatusView(nodeID, nodeName string, r *adminv1.GetWarpResponse, now tim
 	return v
 }
 
-// NodeMetricsV is the node_metrics result. The API has no history per node: these are the current gauges and today's totals.
+// NodeMetricsV is the node_metrics result: the current gauges and today's totals, and with hours the host load per hour
+// (Series, oldest first, bucketed when the window is long) and the peaks over the whole window.
 type NodeMetricsV struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	Status       string            `json:"status"`
-	HasMetrics   bool              `json:"has_metrics"`
-	AtUnix       int64             `json:"at_unix,omitempty"`
-	CPUPct       float32           `json:"cpu_pct"`
-	SoftIRQPct   float32           `json:"softirq_pct"`
-	Load1        float32           `json:"load1"`
-	RAMUsed      uint64            `json:"ram_used_bytes"`
-	RAMTotal     uint64            `json:"ram_total_bytes"`
-	DiskUsed     uint64            `json:"disk_used_bytes"`
-	DiskTotal    uint64            `json:"disk_total_bytes"`
-	NetRxBps     uint64            `json:"net_rx_bps"`
-	NetTxBps     uint64            `json:"net_tx_bps"`
-	TrafficToday uint64            `json:"traffic_today_bytes"`
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Status       string  `json:"status"`
+	HasMetrics   bool    `json:"has_metrics"`
+	AtUnix       int64   `json:"at_unix,omitempty"`
+	CPUPct       float32 `json:"cpu_pct"`
+	SoftIRQPct   float32 `json:"softirq_pct"`
+	Load1        float32 `json:"load1"`
+	RAMUsed      uint64  `json:"ram_used_bytes"`
+	RAMTotal     uint64  `json:"ram_total_bytes"`
+	DiskUsed     uint64  `json:"disk_used_bytes"`
+	DiskTotal    uint64  `json:"disk_total_bytes"`
+	NetRxBps     uint64  `json:"net_rx_bps"`
+	NetTxBps     uint64  `json:"net_tx_bps"`
+	TrafficToday uint64  `json:"traffic_today_bytes"`
+	// Res is absent when the agent predates the resource fields: those are not known, not zero.
+	Res          *liveResV         `json:"resources,omitempty"`
 	OnlineByProt map[string]uint32 `json:"online_by_protocol,omitempty"`
 	TopToday     []topUserV        `json:"top_today,omitempty"`
+	HistoryHours int               `json:"history_hours,omitempty"`
+	BucketHours  int               `json:"bucket_hours,omitempty"`
+	Peaks        *metricsPeaksV    `json:"peaks,omitempty"`
+	Series       []metricsHourV    `json:"series,omitempty"`
+	Truncated    bool              `json:"truncated,omitempty"`
 }
 
 func nodeMetricsView(r *adminv1.GetNodeResponse) *NodeMetricsV {
@@ -336,12 +350,50 @@ func nodeMetricsView(r *adminv1.GetNodeResponse) *NodeMetricsV {
 		v.AtUnix, v.CPUPct, v.SoftIRQPct, v.Load1 = m.GetAtUnix(), m.GetCpuPct(), m.GetSoftirqPct(), m.GetLoad1()
 		v.RAMUsed, v.RAMTotal, v.DiskUsed, v.DiskTotal = m.GetRamUsedBytes(), m.GetRamTotalBytes(), m.GetDiskUsedBytes(), m.GetDiskTotalBytes()
 		v.NetRxBps, v.NetTxBps = m.GetNetRxBps(), m.GetNetTxBps()
+		v.Res = liveResView(m)
 	}
 	for i, t := range r.GetTopToday() {
 		if i == 10 {
 			break
 		}
 		v.TopToday = append(v.TopToday, topUserV{UserID: t.GetUserId(), UserName: nm(t.GetUserName()), Bytes: t.GetBytes()})
+	}
+	return v
+}
+
+// liveResV is what an agent with the resource fields adds to the current gauges: the parts of the CPU, swap, connection
+// tracking, sockets, the link speed, and the agent process itself (every engine runs inside it: what Mistgate costs the node).
+type liveResV struct {
+	StealPct         float32 `json:"steal_pct"`
+	IOWaitPct        float32 `json:"iowait_pct"`
+	SwapUsed         uint64  `json:"swap_used_bytes"`
+	SwapTotal        uint64  `json:"swap_total_bytes"`
+	ConntrackCount   uint64  `json:"conntrack_count,omitempty"`
+	ConntrackMax     uint64  `json:"conntrack_max,omitempty"`
+	ConntrackFillPct float32 `json:"conntrack_fill_pct,omitempty"`
+	TCPSockets       uint32  `json:"tcp_sockets"`
+	UDPSockets       uint32  `json:"udp_sockets"`
+	NICSpeedMbps     uint32  `json:"nic_speed_mbps,omitempty"`
+	AgentCPUPct      float32 `json:"agent_cpu_pct"`
+	AgentRSS         uint64  `json:"agent_rss_bytes"`
+	AgentGoHeap      uint64  `json:"agent_go_heap_bytes"`
+	AgentGoroutines  uint32  `json:"agent_goroutines"`
+	AgentThreads     uint32  `json:"agent_threads"`
+	AgentFDs         uint32  `json:"agent_open_fds"`
+	AgentFDLimit     uint32  `json:"agent_fd_limit,omitempty"`
+}
+
+func liveResView(m *adminv1.NodeMetrics) *liveResV {
+	a := m.GetAgent()
+	if a == nil {
+		return nil
+	}
+	v := &liveResV{StealPct: m.GetStealPct(), IOWaitPct: m.GetIowaitPct(), SwapUsed: m.GetSwapUsedBytes(), SwapTotal: m.GetSwapTotalBytes(),
+		ConntrackCount: m.GetConntrackCount(), ConntrackMax: m.GetConntrackMax(), TCPSockets: m.GetTcpSockets(), UDPSockets: m.GetUdpSockets(),
+		NICSpeedMbps: m.GetNicSpeedMbps(), AgentCPUPct: a.GetCpuPct(), AgentRSS: a.GetRssBytes(), AgentGoHeap: a.GetGoHeapBytes(),
+		AgentGoroutines: a.GetGoroutines(), AgentThreads: a.GetThreads(), AgentFDs: a.GetOpenFds(), AgentFDLimit: a.GetFdLimit()}
+	if mx := m.GetConntrackMax(); mx > 0 {
+		v.ConntrackFillPct = float32(math.Round(float64(m.GetConntrackCount())/float64(mx)*1000) / 10)
 	}
 	return v
 }
@@ -412,9 +464,11 @@ func doctorView(nodes []*adminv1.NodeDoctor, fresh bool) *DoctorV {
 // node_ports
 
 type portInboundV struct {
-	InboundID string `json:"inbound_id"`
-	ProfileID string `json:"profile_id"`
-	Profile   string `json:"profile"`
+	InboundID             string `json:"inbound_id"`
+	ProfileID             string `json:"profile_id"`
+	Profile               string `json:"profile"`
+	DirectInSubscriptions bool   `json:"direct_in_subscriptions"`
+	CDN                   bool   `json:"cdn"`
 }
 
 type portCheckV struct {
@@ -424,6 +478,7 @@ type portCheckV struct {
 	Got            uint32         `json:"got"`
 	Checked        int64          `json:"checked_unix"`
 	Bad            int64          `json:"bad_unix"`
+	ProtocolOKUnix int64          `json:"protocol_ok_unix"`
 	Sender         string         `json:"sender,omitempty"`
 	SenderVerdict  string         `json:"sender_verdict,omitempty"`
 	ConfirmSender  string         `json:"confirm_sender,omitempty"`
@@ -449,16 +504,18 @@ type tcpCheckV struct {
 
 // NodePortsV is the node_ports result.
 type NodePortsV struct {
-	NodeID    string       `json:"node_id"`
-	NodeName  string       `json:"node_name"`
-	ErrorCode string       `json:"error_code,omitempty"`
-	Sender    string       `json:"sender,omitempty"`
-	Ports     []portCheckV `json:"ports"`
-	TCP       []tcpCheckV  `json:"tcp"`
+	NodeID          string       `json:"node_id"`
+	NodeName        string       `json:"node_name"`
+	ErrorCode       string       `json:"error_code,omitempty"`
+	Sender          string       `json:"sender,omitempty"`
+	UDPFilteredUnix int64        `json:"udp_filtered_unix"`
+	Ports           []portCheckV `json:"ports"`
+	TCP             []tcpCheckV  `json:"tcp"`
 }
 
-func nodePortsView(nodeID, nodeName string, checks []*adminv1.PortCheck, tcp []*adminv1.TcpCheck, inbounds []*adminv1.Inbound, errorCode, sender string) *NodePortsV {
-	v := &NodePortsV{NodeID: nodeID, NodeName: nm(nodeName), ErrorCode: clean(errorCode, 40), Sender: clean(sender, 80), Ports: []portCheckV{}, TCP: []tcpCheckV{}}
+func nodePortsView(nodeID, nodeName string, checks []*adminv1.PortCheck, tcp []*adminv1.TcpCheck, inbounds []*adminv1.Inbound, errorCode, sender string, udpFilteredUnix int64) *NodePortsV {
+	v := &NodePortsV{NodeID: nodeID, NodeName: nm(nodeName), ErrorCode: clean(errorCode, 40), Sender: clean(sender, 80),
+		UDPFilteredUnix: udpFilteredUnix, Ports: []portCheckV{}, TCP: []tcpCheckV{}}
 	for _, row := range tcp {
 		if row != nil {
 			v.TCP = append(v.TCP, tcpCheckV{Port: row.GetPort(), Role: clean(row.GetRole(), 16), ALPN: row.GetAlpn(), Profile: nm(row.GetProfile()),
@@ -470,7 +527,7 @@ func nodePortsView(nodeID, nodeName string, checks []*adminv1.PortCheck, tcp []*
 			continue
 		}
 		row := portCheckV{Port: check.GetPort(), Verdict: clean(check.GetVerdict(), 16), Sent: check.GetSent(), Got: check.GetGot(),
-			Checked: check.GetCheckedUnix(), Bad: check.GetBadUnix(), Sender: clean(check.GetSender(), 80),
+			Checked: check.GetCheckedUnix(), Bad: check.GetBadUnix(), ProtocolOKUnix: check.GetProtocolOkUnix(), Sender: clean(check.GetSender(), 80),
 			SenderVerdict: clean(check.GetSenderVerdict(), 16), ConfirmSender: clean(check.GetConfirmSender(), 80),
 			ConfirmSent: check.GetConfirmSent(), ConfirmGot: check.GetConfirmGot(), ConfirmVerdict: clean(check.GetConfirmVerdict(), 16),
 			Blame: clean(check.GetBlame(), 16), Reason: clean(check.GetReason(), 40),
@@ -486,7 +543,7 @@ func nodePortsView(nodeID, nodeName string, checks []*adminv1.PortCheck, tcp []*
 				continue
 			}
 			row.Inbounds = append(row.Inbounds, portInboundV{InboundID: clean(inbound.GetId(), 80), ProfileID: clean(inbound.GetProfileId(), 80),
-				Profile: nm(inbound.GetProfileName())})
+				Profile: nm(inbound.GetProfileName()), DirectInSubscriptions: inbound.GetDirectInSubscriptions(), CDN: inbound.GetCdn()})
 		}
 		v.Ports = append(v.Ports, row)
 	}
@@ -581,6 +638,10 @@ type groupV struct {
 	DisabledNodeIDs []string `json:"disabled_node_ids,omitempty"`
 	UserCount       uint32   `json:"user_count"`
 	DNSPreset       string   `json:"dns_preset_id,omitempty"`
+	Color           string   `json:"color,omitempty"`
+	HappNodes       uint32   `json:"happ_nodes"`
+	AmneziaNodes    uint32   `json:"amnezia_nodes"`
+	TelegramNodes   uint32   `json:"telegram_nodes"`
 }
 
 // GroupsV is the groups_list result.
@@ -597,7 +658,8 @@ func (v *GroupsV) shrink() bool {
 func groupsView(r *adminv1.ListGroupsResponse) *GroupsV {
 	v := &GroupsV{Groups: []groupV{}}
 	for _, g := range r.GetGroups() {
-		gv := groupV{ID: g.GetId(), Name: nm(g.GetName()), UserCount: g.GetUserCount(), DNSPreset: clean(g.GetDnsPresetId(), 60)}
+		gv := groupV{ID: g.GetId(), Name: nm(g.GetName()), UserCount: g.GetUserCount(), DNSPreset: clean(g.GetDnsPresetId(), 60),
+			Color: clean(g.GetColor(), 20), HappNodes: g.GetHappNodes(), AmneziaNodes: g.GetAmneziaNodes(), TelegramNodes: g.GetTelegramNodes()}
 		for i, id := range g.GetProfileIds() {
 			if i == maxIDs {
 				break
@@ -907,7 +969,7 @@ func alertView(a *adminv1.Alert) alertV {
 	v := alertV{
 		ID: a.GetId(), Severity: enumName("ALERT_SEVERITY_", a.GetSeverity().String()), Kind: enumName("ALERT_KIND_", a.GetKind().String()),
 		NodeID: a.GetNodeId(), NodeName: nm(a.GetNodeName()), Subject: nm(a.GetSubject()), Title: clean(a.GetTitleKey(), 80),
-		Params: cleanMap(a.GetParams(), maxParamValue), Why: clean(a.GetWhyKey(), 80), First: a.GetFirstSeenUnix(), Opened: a.GetOpenedUnix(),
+		Params: insMap(a.GetParams(), maxParamValue), Why: clean(a.GetWhyKey(), 80), First: a.GetFirstSeenUnix(), Opened: a.GetOpenedUnix(),
 		Last: a.GetLastSeenUnix(), Resolved: a.GetResolvedAtUnix(), Resolution: clean(a.GetResolution(), 60),
 		MutedTill: a.GetMutedUntilUnix(),
 	}
@@ -988,7 +1050,7 @@ func eventsView(evs []*adminv1.Event, code string, hasMore bool) *EventsV {
 		}
 		v.Events = append(v.Events, eventV{
 			ID: e.GetId(), Time: e.GetTimeUnix(), Severity: enumName("EVENT_SEVERITY_", e.GetSeverity().String()),
-			Code: clean(e.GetCode(), 80), Params: cleanMap(e.GetParams(), maxParamValue),
+			Code: clean(e.GetCode(), 80), Params: insMap(e.GetParams(), maxParamValue),
 			NodeID: e.GetNodeId(), NodeName: nm(e.GetNodeName()), UserID: e.GetUserId(), UserName: nm(e.GetUserName()),
 		})
 	}
@@ -1025,6 +1087,53 @@ type checkV struct {
 	FailStreak   uint32 `json:"fail_streak,omitempty"`
 	OK24h        uint32 `json:"ok_24h"`
 	Failed24h    uint32 `json:"failed_24h"`
+	// InboundID is the inbound this cell is (checks_run_now's inbound argument). Stats24h: p50 and p95 of connect_ms and
+	// response_ms and the jitter (standard deviation of response_ms) over the rounds of the last 24 hours that came up.
+	// Daily: the finished UTC days of the daily rollup, oldest first, only with daily_days.
+	InboundID string       `json:"inbound_id,omitempty"`
+	Stats24h  *checkStatsV `json:"stats_24h,omitempty"`
+	Daily     []checkDayV  `json:"daily,omitempty"`
+}
+
+type checkStatsV struct {
+	Rounds        uint32 `json:"rounds"`
+	ConnectP50Ms  uint32 `json:"connect_p50_ms,omitempty"`
+	ConnectP95Ms  uint32 `json:"connect_p95_ms,omitempty"`
+	ResponseP50Ms uint32 `json:"response_p50_ms,omitempty"`
+	ResponseP95Ms uint32 `json:"response_p95_ms,omitempty"`
+	JitterMs      uint32 `json:"jitter_ms,omitempty"`
+}
+
+type checkDayV struct {
+	DayUnix       int64  `json:"day_unix"`
+	OK            uint32 `json:"ok"`
+	Degraded      uint32 `json:"degraded,omitempty"`
+	Failed        uint32 `json:"failed"`
+	LatencyP50Ms  uint32 `json:"latency_p50_ms,omitempty"`
+	LatencyP95Ms  uint32 `json:"latency_p95_ms,omitempty"`
+	ConnectP50Ms  uint32 `json:"connect_p50_ms,omitempty"`
+	ConnectP95Ms  uint32 `json:"connect_p95_ms,omitempty"`
+	ResponseP50Ms uint32 `json:"response_p50_ms,omitempty"`
+	ResponseP95Ms uint32 `json:"response_p95_ms,omitempty"`
+	JitterMs      uint32 `json:"jitter_ms,omitempty"`
+}
+
+func checkStatsView(s *adminv1.CheckStats) *checkStatsV {
+	if s == nil {
+		return nil
+	}
+	return &checkStatsV{Rounds: s.GetRounds(), ConnectP50Ms: s.GetConnectP50Ms(), ConnectP95Ms: s.GetConnectP95Ms(),
+		ResponseP50Ms: s.GetResponseP50Ms(), ResponseP95Ms: s.GetResponseP95Ms(), JitterMs: s.GetJitterMs()}
+}
+
+func checkDaysView(days []*adminv1.CheckDay) []checkDayV {
+	var out []checkDayV
+	for _, d := range days {
+		out = append(out, checkDayV{DayUnix: d.GetDayUnix(), OK: d.GetOk(), Degraded: d.GetDegraded(), Failed: d.GetFailed(),
+			LatencyP50Ms: d.GetLatencyP50Ms(), LatencyP95Ms: d.GetLatencyP95Ms(), ConnectP50Ms: d.GetConnectP50Ms(), ConnectP95Ms: d.GetConnectP95Ms(),
+			ResponseP50Ms: d.GetResponseP50Ms(), ResponseP95Ms: d.GetResponseP95Ms(), JitterMs: d.GetJitterMs()})
+	}
+	return out
 }
 
 type checkRowV struct {
@@ -1350,6 +1459,56 @@ type deviceConnV struct {
 	LossPermille *uint32     `json:"loss_permille,omitempty"`
 	RttSamples   uint32      `json:"rtt_samples,omitempty"`
 	PktsSent     uint64      `json:"pkts_sent,omitempty"`
+	keyReasonsV
+	Unsupported []string `json:"unsupported,omitempty"`
+}
+
+// keyReasonsV are the links/3 counters of a key (agent.proto LinkCounters).
+type keyReasonsV struct {
+	TCPStalls          uint32 `json:"tcp_stalls,omitempty"`
+	TCPStalls16K       uint32 `json:"tcp_stalls_16k,omitempty"`
+	Initiations        uint32 `json:"initiations,omitempty"`
+	Responses          uint32 `json:"responses,omitempty"`
+	ResponsesUnmatched uint32 `json:"responses_unmatched,omitempty"`
+}
+
+// linkReasonsV are all the links/3 counters of an inbound or an hour.
+type linkReasonsV struct {
+	HsUnfinished    uint32 `json:"hs_unfinished,omitempty"`
+	TLSAlertsSent   uint32 `json:"tls_alerts_sent,omitempty"`
+	TLSAlertsRecv   uint32 `json:"tls_alerts_recv,omitempty"`
+	TLSCertRefused  uint32 `json:"tls_cert_refused,omitempty"`
+	RealityFallback uint32 `json:"reality_fallback,omitempty"`
+	AuthFailed      uint32 `json:"auth_failed,omitempty"`
+	keyReasonsV
+}
+
+type linkReasonsSource interface {
+	GetHsUnfinished() uint32
+	GetTlsAlertsSent() uint32
+	GetTlsAlertsRecv() uint32
+	GetTlsCertRefused() uint32
+	GetRealityFallback() uint32
+	GetAuthFailed() uint32
+	keyReasonsSource
+}
+
+type keyReasonsSource interface {
+	GetTcpStalls() uint32
+	GetTcpStalls_16K() uint32
+	GetInitiations() uint32
+	GetResponses() uint32
+	GetResponsesUnmatched() uint32
+}
+
+func keyReasonsView(s keyReasonsSource) keyReasonsV {
+	return keyReasonsV{TCPStalls: s.GetTcpStalls(), TCPStalls16K: s.GetTcpStalls_16K(), Initiations: s.GetInitiations(), Responses: s.GetResponses(),
+		ResponsesUnmatched: s.GetResponsesUnmatched()}
+}
+
+func linkReasonsView(s linkReasonsSource) linkReasonsV {
+	return linkReasonsV{HsUnfinished: s.GetHsUnfinished(), TLSAlertsSent: s.GetTlsAlertsSent(), TLSAlertsRecv: s.GetTlsAlertsRecv(),
+		TLSCertRefused: s.GetTlsCertRefused(), RealityFallback: s.GetRealityFallback(), AuthFailed: s.GetAuthFailed(), keyReasonsV: keyReasonsView(s)}
 }
 
 type nodeWithoutV struct {
@@ -1377,7 +1536,7 @@ func userConnectionView(r *adminv1.GetUserConnectionResponse, nodes []*adminv1.N
 			LastHourUnix: d.GetLastHourUnix(), Platform: clean(d.GetPlatform(), 40), Client: clean(d.GetClient(), 80), Kind: clean(d.GetKind(), 40),
 			Hours: []linkHourV{}, ClientCloses: d.GetClientCloses(), Freezes: d.GetFreezes(), Quiet: d.GetQuiet(),
 			RttMs: metricWhen(d.GetRttMs(), d.GetRttSamples() > 0), LossPermille: metricWhen(d.GetLossPermille(), d.GetPktsSent() > 0),
-			RttSamples: d.GetRttSamples(), PktsSent: d.GetPktsSent()}
+			RttSamples: d.GetRttSamples(), PktsSent: d.GetPktsSent(), keyReasonsV: keyReasonsView(d), Unsupported: append([]string(nil), d.GetUnsupported()...)}
 		for _, h := range d.GetHours() {
 			dv.Hours = append(dv.Hours, linkHourView(h))
 		}
@@ -1432,6 +1591,7 @@ type inboundConnV struct {
 	LossPermille  *uint32       `json:"loss_permille,omitempty"`
 	RttSamples    uint32        `json:"rtt_samples,omitempty"`
 	PktsSent      uint64        `json:"pkts_sent,omitempty"`
+	linkReasonsV
 }
 
 type linkHourV struct {
@@ -1453,6 +1613,7 @@ type linkHourV struct {
 	LossPermille  *uint32 `json:"loss_permille,omitempty"`
 	RttSamples    uint32  `json:"rtt_samples,omitempty"`
 	PktsSent      uint64  `json:"pkts_sent,omitempty"`
+	linkReasonsV
 }
 
 type clientConnV struct {
@@ -1482,7 +1643,8 @@ func linkHourView(h *adminv1.LinkHour) linkHourV {
 		Stalls: h.GetStalls(), OnlineS: h.GetOnlineS(), UnknownKeys: h.GetUnknownKeys(), Hellos: h.GetHellos(), Handshakes: h.GetHandshakes(),
 		ClientCloses: h.GetClientCloses(), Freezes: h.GetFreezes(), Quiet: h.GetQuiet(), Accepted: h.GetAccepted(),
 		HellosForeign: h.GetHellosForeign(), RttMs: metricWhen(h.GetRttMs(), h.GetRttSamples() > 0),
-		LossPermille: metricWhen(h.GetLossPermille(), h.GetPktsSent() > 0), RttSamples: h.GetRttSamples(), PktsSent: h.GetPktsSent()}
+		LossPermille: metricWhen(h.GetLossPermille(), h.GetPktsSent() > 0), RttSamples: h.GetRttSamples(), PktsSent: h.GetPktsSent(),
+		linkReasonsV: linkReasonsView(h)}
 }
 
 func metricWhen(value uint32, available bool) *uint32 {
@@ -1499,7 +1661,8 @@ func inboundConnectionsView(i *adminv1.InboundConnections) inboundConnV {
 		KeysStalled: i.GetKeysStalled(), KeysTried: i.GetKeysTried(), Unsupported: append([]string(nil), i.GetUnsupported()...),
 		Hours: []linkHourV{}, Clients: []clientConnV{}, ClientCloses: i.GetClientCloses(), Freezes: i.GetFreezes(), Quiet: i.GetQuiet(),
 		Accepted: i.GetAccepted(), HellosForeign: i.GetHellosForeign(), RttMs: metricWhen(i.GetRttMs(), i.GetRttSamples() > 0),
-		LossPermille: metricWhen(i.GetLossPermille(), i.GetPktsSent() > 0), RttSamples: i.GetRttSamples(), PktsSent: i.GetPktsSent()}
+		LossPermille: metricWhen(i.GetLossPermille(), i.GetPktsSent() > 0), RttSamples: i.GetRttSamples(), PktsSent: i.GetPktsSent(),
+		linkReasonsV: linkReasonsView(i)}
 	for _, h := range i.GetHours() {
 		v.Hours = append(v.Hours, linkHourView(h))
 	}
@@ -1652,13 +1815,14 @@ func checksView(r *adminv1.GetChecksResponse) *ChecksV {
 			Country: countryCheckView(country[row.GetNodeId()])}
 		for _, c := range row.GetCells() {
 			cv := checkV{Deployed: c.GetDeployed(), FailStreak: c.GetFailStreak(), ResponseHourMs: c.GetResponseHourMs(), ConnectHourMs: c.GetConnectHourMs(),
-				UDPSentHour: c.GetUdpSentHour(), UDPLostHour: c.GetUdpLostHour(), NodeSentHour: c.GetNodeSentHour(), NodeLostHour: c.GetNodeLostHour()}
+				UDPSentHour: c.GetUdpSentHour(), UDPLostHour: c.GetUdpLostHour(), NodeSentHour: c.GetNodeSentHour(), NodeLostHour: c.GetNodeLostHour(),
+				InboundID: clean(c.GetInboundId(), 80), Stats24h: checkStatsView(c.GetStats_24H()), Daily: checkDaysView(c.GetDaily())}
 			if l := c.GetLast(); l != nil {
 				cv.Status = enumName("CHECK_STATUS_", l.GetStatus().String())
 				cv.AtUnix, cv.LatencyMs, cv.ExitCtry = l.GetAtUnix(), l.GetLatencyMs(), clean(l.GetExitCountry(), 8)
 				cv.ConnectMs, cv.ResponseMs = l.GetConnectMs(), l.GetResponseMs()
 				cv.UDPSent, cv.UDPLost = l.GetUdpSent(), l.GetUdpLost()
-				cv.ErrorCode, cv.ErrorInfo = clean(l.GetErrorCode(), 60), clean(l.GetErrorDetail(), 200)
+				cv.ErrorCode, cv.ErrorInfo = clean(l.GetErrorCode(), 60), noAddr(clean(l.GetErrorDetail(), 200))
 			}
 			for _, b := range c.GetHistory() {
 				cv.OK24h += b.GetOk()
@@ -1693,7 +1857,6 @@ type auditV struct {
 	Action    string `json:"action"`
 	Params    string `json:"params,omitempty"`
 	Result    string `json:"result,omitempty"`
-	IP        string `json:"ip,omitempty"`
 }
 
 // AuditV is the audit_search result.
@@ -1765,13 +1928,17 @@ type bundleV struct {
 
 // UpdatesV is the updates_status result.
 type UpdatesV struct {
-	NowUnix      int64         `json:"now_unix"`
-	PanelVersion string        `json:"panel_version"`
-	PanelBuilt   int64         `json:"panel_built,omitempty"`
-	Bundle       *bundleV      `json:"bundle,omitempty"`
-	Nodes        []nodeUpdateV `json:"nodes"`
-	Rollout      *rolloutV     `json:"rollout,omitempty"`
-	Truncated    bool          `json:"truncated,omitempty"`
+	NowUnix                       int64         `json:"now_unix"`
+	PanelVersion                  string        `json:"panel_version"`
+	PanelBuilt                    int64         `json:"panel_built,omitempty"`
+	UpdateChannel                 string        `json:"update_channel"`
+	RunningVersionChannel         string        `json:"running_version_channel,omitempty"`
+	OfferedReleaseChannel         string        `json:"offered_release_channel,omitempty"`
+	RunningNewerThanChannelOffers bool          `json:"running_newer_than_channel_offers"`
+	Bundle                        *bundleV      `json:"bundle,omitempty"`
+	Nodes                         []nodeUpdateV `json:"nodes"`
+	Rollout                       *rolloutV     `json:"rollout,omitempty"`
+	Truncated                     bool          `json:"truncated,omitempty"`
 }
 
 func (v *UpdatesV) shrink() bool {
@@ -1801,7 +1968,12 @@ func rolloutView(r *adminv1.Rollout) *rolloutV {
 }
 
 func updatesView(r *adminv1.GetUpdatesResponse) *UpdatesV {
-	v := &UpdatesV{NowUnix: r.GetNowUnix(), PanelVersion: clean(r.GetPanel().GetVersion(), 60), PanelBuilt: r.GetPanel().GetBuilt(), Nodes: []nodeUpdateV{}}
+	v := &UpdatesV{
+		NowUnix: r.GetNowUnix(), PanelVersion: clean(r.GetPanel().GetVersion(), 60), PanelBuilt: r.GetPanel().GetBuilt(),
+		UpdateChannel: clean(r.GetUpdateChannel(), 16), RunningVersionChannel: clean(r.GetRunningVersionChannel(), 16),
+		OfferedReleaseChannel:         clean(r.GetOfferedReleaseChannel(), 16),
+		RunningNewerThanChannelOffers: r.GetRunningNewerThanChannelOffers(), Nodes: []nodeUpdateV{},
+	}
 	if b := r.GetBundle(); b != nil {
 		v.Bundle = &bundleV{
 			Status: enumName("BUNDLE_STATUS_", b.GetStatus().String()), Version: clean(b.GetVersion(), 60), Built: b.GetBuilt(),

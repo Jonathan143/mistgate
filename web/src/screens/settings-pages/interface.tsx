@@ -7,6 +7,12 @@ import { Icon } from "@/components/ui/icons";
 import { Card, SectionLabel } from "@/components/ui/bits";
 import { Segmented } from "@/components/ui/segmented";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { halo } from "@/components/fx/halo";
+import { pageSweepOptions } from "@/components/fx/page";
+import { setEffectKind, setEffectsEnabled, useEffectKind, useEffectsEnabled, type FxKind } from "@/lib/effects";
+import { useEdition } from "@/lib/edition";
+import { sweep } from "@/components/fx/sweep";
 import { TextField } from "@/components/ui/text-field";
 import { useToast } from "@/components/ui/toast";
 import { Role } from "@/gen/mistgate/admin/v1/auth_pb";
@@ -35,6 +41,9 @@ export function InterfacePage() {
   const theme = useTheme();
   const me = useQuery(meQuery);
   const { own } = useAccentChoice();
+  const effects = useEffectsEnabled();
+  const edition = useEdition();
+  const fxRow = useRef<HTMLDivElement>(null);
   const row = "flex min-h-14 items-center gap-3 border-t border-line";
   return (
     <>
@@ -82,10 +91,48 @@ export function InterfacePage() {
             </p>
           )}
         </div>
+        {!edition.edge && (
+        <div ref={fxRow} className={row}>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-2">
+            <span className="flex items-center gap-1.5 text-[13px] font-bold">
+              {t("settings.fx")}
+              <span className="rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-bold tracking-wide text-accent-text uppercase">{t("settings.fx.beta")}</span>
+            </span>
+            <span className="text-xs leading-snug text-muted">{t("settings.fx.hint")}</span>
+          </span>
+          {effects && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => {
+              halo(null);
+              if (fxRow.current) void sweep(fxRow.current, pageSweepOptions());
+            }}>
+              {t("settings.fx.show")}
+            </Button>
+          )}
+          <Switch checked={effects} onCheckedChange={setEffectsEnabled} aria-label={t("settings.fx")} />
+        </div>
+        )}
+        {effects && !edition.edge && (
+          <>
+            {(["create", "save", "pages"] as const).map((k) => (
+              <FxKindRow key={k} kind={k} label={t(`settings.fx.${k}`)} />
+            ))}
+          </>
+        )}
         <p className="border-t border-line py-3 text-xs leading-normal text-muted">{t("settings.local")}</p>
       </Card>
       {me.data?.admin?.role === Role.OWNER && <BrandBlock />}
     </>
+  );
+}
+
+/** One of the moments the reveal animation plays at, indented under the main switch. */
+function FxKindRow({ kind, label }: { kind: FxKind; label: string }) {
+  const on = useEffectKind(kind);
+  return (
+    <div className="flex min-h-12 items-center gap-3 border-t border-line ps-4">
+      <span className="flex-1 text-[13px] font-semibold text-muted">{label}</span>
+      <Switch checked={on} onCheckedChange={(v) => setEffectKind(kind, v)} aria-label={label} />
+    </div>
   );
 }
 
@@ -131,6 +178,7 @@ function BrandForm({ stored }: { stored: Plain<Instance> }) {
     onSuccess: (r) => {
       const i = r.instance!;
       toast(t("common.saved"));
+      halo("save");
       setLogo({ kind: "keep" });
       void applyBrand(i, i.logoVersion);
       qc.setQueryData(instanceQuery.queryKey, plain(r));

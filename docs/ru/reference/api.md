@@ -54,7 +54,7 @@ API описан в `proto/mistgate/admin/v1/`. Сгенерированный �
 
 ## API-токены
 
-Владелец создаёт токены в **Интеграции → API-токены → Новый токен** (нужно свежее повторное подтверждение входа):
+Владелец создаёт токены в **ИИ → MCP и токены → Новый токен** (нужно свежее повторное подтверждение входа):
 
 | Поле | Правило |
 |---|---|
@@ -195,11 +195,11 @@ func main() {
 | `SubscriptionService.GetSubscriptionSettings`, `ListClients`, `TestUserAgent` | да | да | да |
 | `UpdateService.GetUpdates` | да | да | да |
 | `UserService.CreateUser`, `UpdateUser`, `SetUsersEnabled`, `ExtendUsers`, `ResetUserTraffic`, `RevokeDevice` | нет | да | да |
-| `HealthService.MuteAlert`, `RunChecksNow`, `RunDoctor` | нет | да | да |
+| `HealthService.MuteAlert`, `DismissAlert`, `RunChecksNow`, `RunDoctor` | нет | да | да |
 | `AuthService.ListAudit` | нет | нет | да |
 | `HealthService.ApplyFix` | нет | нет | только через одобренный план MCP |
 | `UpdateService.StartRollout`, `PauseRollout`, `ResumeRollout`, `CancelRollout`, `RollbackNode` | нет | нет | только через одобренный план MCP |
-| `UpdateService.ScheduleNodeUpdate`, `CancelNodeUpdateSchedule`, `SetUpdateTimezone` | нет | нет | только через одобренный план MCP |
+| `UpdateService.ScheduleNodeUpdate`, `CancelNodeUpdateSchedule`, `SetUpdateTimezone`, `SetUpdateDownloadTimeout` | нет | нет | только через одобренный план MCP |
 | `ProvisioningService.ListNodeServerAccess` (данные подключения, без пароля) | нет | нет | да |
 | `ProvisioningService.GetSSHFingerprint` | нет | нет | только пока MCP-сервер составляет план `node_install` |
 | `ProvisioningService.StartNodeProvision`, `RotateNodeServerPassword` | нет | нет | только через одобренный план MCP |
@@ -212,7 +212,7 @@ func main() {
 
 Токен никогда не проходит повторное подтверждение. Процедуры, которым оно нужно или которые меняют то, что работает на нодах, напрямую токену недоступны; через обычный API они отвечают 403 «this needs the owner's approval; it is not available over the API».
 
-Добраться до них можно только через [MCP-сервер](mcp.md) с токеном профиля «Админ» (до списка приложений на странице пользователя — начиная с профиля «Оператор»): агент планирует изменение, владелец читает план в **Интеграции → Ждут тебя** и одобряет его (со своим повторным подтверждением), после чего применение выполняет одобренный план. Одобрение проверяется в базе при каждом вызове, а разрешение охватывает только процедуры, перечисленные в этом плане. План истекает через 10 минут после создания.
+Добраться до них можно только через [MCP-сервер](mcp.md) с токеном профиля «Админ» (до списка приложений на странице пользователя — начиная с профиля «Оператор»): агент планирует изменение, владелец читает план в **ИИ → Ждут вас** и одобряет его (со своим повторным подтверждением), после чего применение выполняет одобренный план. Одобрение проверяется в базе при каждом вызове, а разрешение охватывает только процедуры, перечисленные в этом плане. План истекает через 10 минут после создания.
 
 ## Ограничения
 

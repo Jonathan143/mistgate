@@ -181,6 +181,36 @@ func TestMuteAlertRPC(t *testing.T) {
 	}
 }
 
+func TestDismissAlertRPC(t *testing.T) {
+	e := newEnv(t)
+	e.node("de1", "hetzner", true)
+	r := rpc{e.s}
+	e.report("de1", false, res("disk_space", dFail, ""))
+	id := e.active()["doctor_fail/de1/disk_space"].ID
+
+	_, err := r.DismissAlert(e.ctx, req(&adminv1.DismissAlertRequest{AlertId: "alt_nope"}))
+	wantCode(t, err, connect.CodeNotFound, "alert")
+	d, err := r.DismissAlert(e.ctx, req(&adminv1.DismissAlertRequest{AlertId: id}))
+	if err != nil || d.Msg.Alert.ResolvedAtUnix == 0 || d.Msg.Alert.Resolution != "dismissed" {
+		t.Fatalf("dismiss: %+v %v", d, err)
+	}
+	if n, _ := e.s.AlertCounts(e.ctx); n != 0 {
+		t.Fatal("closed alert in the badge")
+	}
+	_, err = r.DismissAlert(e.ctx, req(&adminv1.DismissAlertRequest{AlertId: id}))
+	wantCode(t, err, connect.CodeFailedPrecondition, "resolved")
+	u, err := r.DismissAlert(e.ctx, req(&adminv1.DismissAlertRequest{AlertId: id, Reopen: true}))
+	if err != nil || u.Msg.Alert.ResolvedAtUnix != 0 {
+		t.Fatalf("reopen: %+v %v", u, err)
+	}
+	_, err = r.DismissAlert(e.ctx, req(&adminv1.DismissAlertRequest{AlertId: id, Reopen: true}))
+	wantCode(t, err, connect.CodeFailedPrecondition, "not closed")
+	rows, _ := e.st.ListAudit(e.ctx, "", 0, 10)
+	if len(rows) != 2 || rows[0].Action != "health.reopen_alert" || rows[1].Action != "health.dismiss_alert" || rows[1].Actor != "adm_test" {
+		t.Fatalf("audit: %+v", rows)
+	}
+}
+
 func TestGetChecksMatrix(t *testing.T) {
 	e := newEnv(t)
 	e.node("de1", "hetzner", true)
@@ -832,5 +862,58 @@ func TestReconnectWarpPlanIsDisruptiveAndRequiresConfirmation(t *testing.T) {
 	wantCode(t, err, connect.CodeFailedPrecondition, "no fresh plan")
 	if len(e.fl.fixCalls) != 1 || !e.fl.fixCalls[0].dry {
 		t.Fatalf("WARP changed before confirmation: %+v", e.fl.fixCalls)
+	}
+}
+
+// stats_24h: percentiles of connect_ms and response_ms and the jitter over the rounds that came up; daily_days attaches
+// the rolled-up days.
+func TestGetChecksStatsAndDaily(t *testing.T) {
+	e := newEnv(t)
+	e.node("de1", "hetzner", true)
+	a := e.inbound("de1", 443)
+	now := e.clock.Now()
+	for i, x := range []struct {
+		st         adminv1.CheckStatus
+		conn, resp uint32
+	}{
+		{cOK, 200, 100}, {cOK, 300, 200}, {cDeg, 500, 0}, {cFail, 900, 999},
+	} {
+		e.s.record(e.ctx, a, Result{Status: x.st, At: now.Add(-time.Duration(i+1) * 10 * time.Minute), LatencyMS: 400, ConnectMS: x.conn, ResponseMS: x.resp, ExitIP: "203.0.113.9", ExitCountry: "DE"})
+	}
+	// a finished day, as the rollup leaves it
+	day := now.Unix() - now.Unix()%86400 - 86400
+	e.exec(`INSERT INTO health_check_daily (inbound_id, day, ok, failed, degraded, p50_ms, p95_ms, connect_p50_ms, connect_p95_ms, response_p50_ms, response_p95_ms, jitter_ms)
+		VALUES (?, ?, 5, 1, 2, 300, 900, 250, 800, 100, 400, 40)`, a, day)
+
+	resp, err := rpc{e.s}.GetChecks(e.ctx, req(&adminv1.GetChecksRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cell *adminv1.CheckCell
+	for _, c := range resp.Msg.Rows[0].Cells {
+		if c.Deployed {
+			cell = c
+		}
+	}
+	st := cell.GetStats_24H()
+	// connect 200,300,500 (the failed round is left out): p50 300, p95 500; response 100,200: p50 100, p95 200, stddev 50.
+	if st.GetRounds() != 3 || st.GetConnectP50Ms() != 300 || st.GetConnectP95Ms() != 500 || st.GetResponseP50Ms() != 100 || st.GetResponseP95Ms() != 200 || st.GetJitterMs() != 50 {
+		t.Fatalf("stats_24h: %+v", st)
+	}
+	if len(cell.Daily) != 0 {
+		t.Fatalf("daily without daily_days: %+v", cell.Daily)
+	}
+	resp, err = rpc{e.s}.GetChecks(e.ctx, req(&adminv1.GetChecksRequest{DailyDays: 7}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range resp.Msg.Rows[0].Cells {
+		if c.Deployed {
+			cell = c
+		}
+	}
+	if len(cell.Daily) != 1 || cell.Daily[0].DayUnix != day || cell.Daily[0].ConnectP95Ms != 800 || cell.Daily[0].ResponseP95Ms != 400 || cell.Daily[0].JitterMs != 40 ||
+		cell.Daily[0].Ok != 5 || cell.Daily[0].LatencyP50Ms != 300 {
+		t.Fatalf("daily: %+v", cell.Daily)
 	}
 }

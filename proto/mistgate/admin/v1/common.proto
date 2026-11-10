@@ -35,7 +35,8 @@ enum NodeStatus {
 // Codes: agent_silent {minutes}, host_blip {minutes}, enrollment_pending {expires_in_minutes, expires_unix},
 // enrollment_expired (PENDING without a usable install command), inbound_failed {inbound, error, profile, failed,
 // total} (failed of the node's total enabled profiles do not run), state_drift, clock_skew {seconds}, no_profiles
-// (ONLINE, nothing else wrong, but no enabled profile: nobody gets the node).
+// (ONLINE, nothing else wrong, but no enabled profile: nobody gets the node), inbound_no_way_in {profile, node, reason}
+// (hiding the direct server leaves no usable IPv6 twin, CDN host or relay; reason is "awg", "acme_ip" or "no_usable_relay").
 // The health checks add no_traffic {failed, total} (status NO_TRAFFIC: agent on, synthetic
 // checks failing) and doctor_fail {check} (status stays ONLINE, reason shows the worst FAIL of the doctor).
 message StatusReason {
@@ -98,6 +99,10 @@ message Inbound {
   string tls_server_name_override = 16;
   // Whether this inbound is enabled in the desired state.
   bool enabled = 17;
+  // Whether the server at the node's own address is included in subscriptions. The inbound keeps running when false.
+  bool direct_in_subscriptions = 18;
+  // Whether clients reach this inbound through its CDN host instead of the node's address.
+  bool cdn = 19;
 }
 
 // AmneziaWG interface state of one inbound (agent.v1.AwgHealth).
@@ -184,6 +189,8 @@ message PortCheck {
   string confirm_verdict = 14;
   // "node" when both runs found loss, "path" when only one did, or empty when unconfirmed or both were clean.
   string blame = 15;
+  // Unix time of the latest successful panel protocol probe through an enabled inbound on this port; 0 if its latest result failed or none is stored.
+  int64 protocol_ok_unix = 16 [jstype = JS_NUMBER];
 }
 
 // One TCP port of a node in the port check (design/vless.md section 7.4): does a connection reach Mistgate itself.
@@ -230,4 +237,17 @@ message LinkHour {
   uint32 loss_permille = 16;
   uint32 rtt_samples = 17;
   uint64 pkts_sent = 18 [jstype = JS_NUMBER];
+  // Agents that list "links/3" (see InboundConnections); device rows carry only the per-key ones (tcp_stalls,
+  // tcp_stalls_16k, initiations, responses, responses_unmatched).
+  uint32 hs_unfinished = 19;
+  uint32 tls_alerts_sent = 20;
+  uint32 tls_alerts_recv = 21;
+  uint32 tls_cert_refused = 22;
+  uint32 reality_fallback = 23;
+  uint32 auth_failed = 24;
+  uint32 tcp_stalls = 25;
+  uint32 tcp_stalls_16k = 26;
+  uint32 initiations = 27;
+  uint32 responses = 28;
+  uint32 responses_unmatched = 29;
 }

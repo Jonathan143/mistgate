@@ -67,6 +67,10 @@ const step = (over: Partial<Step> = {}): Step => ({
   finishedUnix: 0,
   errorKey: "",
   params: {},
+  downloadPhase: "",
+  downloadedBytes: 0,
+  totalBytes: 0,
+  bytesPerSecond: 0,
   ...over,
 });
 const rollout = (over: Partial<Rollout> = {}): Rollout => ({
@@ -97,12 +101,17 @@ const bundle = (status: BundleStatus, over: Partial<NonNullable<Updates["bundle"
 const updates = (over: Partial<Updates> = {}): Updates => ({
   nowUnix: 1000,
   scheduleTimezoneOffsetMinutes: 180,
+  updateChannel: "stable",
+  runningVersionChannel: "",
+  offeredReleaseChannel: "",
+  runningNewerThanChannelOffers: false,
   panel: { version: "0.2.0-bbb", built: 200, hasReleaseKey: true, releaseKeyFingerprint: "abcd" },
   bundle: bundle(BundleStatus.TRUSTED),
   nodes: [node({ state: NodeUpdateState.OUTDATED })],
   distDir: "/var/lib/mistgate/dist",
   agentNotes: [],
   panelNotes: [],
+  updateDownloadTimeoutSeconds: 1800,
   ...over,
 });
 

@@ -10,14 +10,15 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file mistgate/admin/v1/common.proto.
  */
 export const file_mistgate_admin_v1_common: GenFile = /*@__PURE__*/
-  fileDesc("Ch5taXN0Z2F0ZS9hZG1pbi92MS9jb21tb24ucHJvdG8SEW1pc3RnYXRlLmFkbWluLnYxIogBCgxTdGF0dXNSZWFzb24SDAoEY29kZRgBIAEoCRI7CgZwYXJhbXMYAiADKAsyKy5taXN0Z2F0ZS5hZG1pbi52MS5TdGF0dXNSZWFzb24uUGFyYW1zRW50cnkaLQoLUGFyYW1zRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIwCg1Qcm90b2NvbENvdW50EhAKCHByb3RvY29sGAEgASgJEg0KBXVzZXJzGAIgASgNIqYDCgdJbmJvdW5kEgoKAmlkGAEgASgJEhIKCnByb2ZpbGVfaWQYAiABKAkSFAoMcHJvZmlsZV9uYW1lGAMgASgJEhAKCHByb3RvY29sGAQgASgJEg8KB25vZGVfaWQYBSABKAkSEQoJbm9kZV9uYW1lGAYgASgJEgwKBHBvcnQYByABKA0SFwoPdGxzX3NlcnZlcl9uYW1lGAggASgJEi4KBXN0YXRlGAkgASgOMh8ubWlzdGdhdGUuYWRtaW4udjEuSW5ib3VuZFN0YXRlEhIKCmxhc3RfZXJyb3IYCiABKAkSFwoPY2VydF9waW5fc2hhMjU2GAsgASgJEh8KE2NlcnRfbm90X2FmdGVyX3VuaXgYDCABKANCAjACEjAKA2F3ZxgNIAEoCzIjLm1pc3RnYXRlLmFkbWluLnYxLkF3Z0luYm91bmRTdGF0dXMSDgoGZWdyZXNzGA4gASgJEhUKDXBvcnRfb3ZlcnJpZGUYDyABKA0SIAoYdGxzX3NlcnZlcl9uYW1lX292ZXJyaWRlGBAgASgJEg8KB2VuYWJsZWQYESABKAgihAIKEEF3Z0luYm91bmRTdGF0dXMSDwoHYmFja2VuZBgBIAEoCRIXCg9iYWNrZW5kX3ZlcnNpb24YAiABKAkSEAoIaWZhY2VfdXAYAyABKAgSDQoFcGVlcnMYBCABKA0SGAoQcGVlcnNfaGFuZHNoYWtlbhgFIAEoDRIUCgxwZWVyc19vbmxpbmUYBiABKA0SIQoVbmV3ZXN0X2hhbmRzaGFrZV91bml4GAcgASgDQgIwAhIaCg51ZHBfcnhfcGFja2V0cxgIIAEoBEICMAISGwoTdW5rbm93bl9wZWVyX2V2ZW50cxgJIAEoDRIZCg1yZXBvcnRlZF91bml4GAogASgDQgIwAiKNAQoLV2FycFN1bW1hcnkSKwoFc3RhdGUYASABKA4yHC5taXN0Z2F0ZS5hZG1pbi52MS5XYXJwU3RhdGUSLQoGc291cmNlGAIgASgOMh0ubWlzdGdhdGUuYWRtaW4udjEuV2FycFNvdXJjZRIMCgRjb2xvGAMgASgJEhQKDGFjY291bnRfdHlwZRgEIAEoCSKpAgoJUG9ydENoZWNrEg8KB25vZGVfaWQYASABKAkSDAoEcG9ydBgCIAEoDRIPCgd2ZXJkaWN0GAMgASgJEgwKBHNlbnQYBCABKA0SCwoDZ290GAUgASgNEhgKDGNoZWNrZWRfdW5peBgGIAEoA0ICMAISFAoIYmFkX3VuaXgYByABKANCAjACEg4KBnNlbmRlchgIIAEoCRIOCgZyZWFzb24YCSABKAkSFgoOc2VuZGVyX3ZlcmRpY3QYCiABKAkSFgoOY29uZmlybV9zZW5kZXIYCyABKAkSFAoMY29uZmlybV9zZW50GAwgASgNEhMKC2NvbmZpcm1fZ290GA0gASgNEhcKD2NvbmZpcm1fdmVyZGljdBgOIAEoCRINCgVibGFtZRgPIAEoCSKQAQoIVGNwQ2hlY2sSDAoEcG9ydBgBIAEoDRIMCgRyb2xlGAIgASgJEgwKBGFscG4YAyABKAgSDwoHcHJvZmlsZRgEIAEoCRIPCgd2ZXJkaWN0GAUgASgJEg4KBnJlYXNvbhgGIAEoCRIOCgZzZW5kZXIYByABKAkSGAoMY2hlY2tlZF91bml4GAggASgDQgIwAiLtAgoITGlua0hvdXISGwoPaG91cl9zdGFydF91bml4GAEgASgDQgIwAhIQCghjb25uZWN0cxgCIAEoDRIPCgdyZWplY3RzGAMgASgNEg0KBWRyb3BzGAQgASgNEg4KBnN0YWxscxgFIAEoDRIUCghvbmxpbmVfcxgGIAEoBEICMAISFAoMdW5rbm93bl9rZXlzGAcgASgNEg4KBmhlbGxvcxgIIAEoDRISCgpoYW5kc2hha2VzGAkgASgNEhUKDWNsaWVudF9jbG9zZXMYCiABKA0SDwoHZnJlZXplcxgLIAEoDRINCgVxdWlldBgMIAEoDRIQCghhY2NlcHRlZBgNIAEoDRIWCg5oZWxsb3NfZm9yZWlnbhgOIAEoDRIOCgZydHRfbXMYDyABKA0SFQoNbG9zc19wZXJtaWxsZRgQIAEoDRITCgtydHRfc2FtcGxlcxgRIAEoDRIVCglwa3RzX3NlbnQYEiABKARCAjACKtUBCgpOb2RlU3RhdHVzEhsKF05PREVfU1RBVFVTX1VOU1BFQ0lGSUVEEAASFwoTTk9ERV9TVEFUVVNfUEVORElORxABEhYKEk5PREVfU1RBVFVTX09OTElORRACEhQKEE5PREVfU1RBVFVTX0RPV04QAxIUChBOT0RFX1NUQVRVU19CTElQEAQSGgoWTk9ERV9TVEFUVVNfTk9fVFJBRkZJQxAFEhgKFE5PREVfU1RBVFVTX1VQREFUSU5HEAYSFwoTTk9ERV9TVEFUVVNfUkVUSVJFRBAHKksKA0FwcBITCg9BUFBfVU5TUEVDSUZJRUQQABIMCghBUFBfSEFQUBABEg8KC0FQUF9BTU5FWklBEAISEAoMQVBQX1RFTEVHUkFNEAMqmAEKDEluYm91bmRTdGF0ZRIdChlJTkJPVU5EX1NUQVRFX1VOU1BFQ0lGSUVEEAASGQoVSU5CT1VORF9TVEFURV9QRU5ESU5HEAESGAoUSU5CT1VORF9TVEFURV9BQ1RJVkUQAhIYChRJTkJPVU5EX1NUQVRFX0ZBSUxFRBADEhoKFklOQk9VTkRfU1RBVEVfRElTQUJMRUQQBCrUAQoJV2FycFN0YXRlEhoKFldBUlBfU1RBVEVfVU5TUEVDSUZJRUQQABIdChlXQVJQX1NUQVRFX05PVF9DT05GSUdVUkVEEAESFgoSV0FSUF9TVEFURV9VTktOT1dOEAISGgoWV0FSUF9TVEFURV9VTkFWQUlMQUJMRRADEhcKE1dBUlBfU1RBVEVfU1RBUlRJTkcQBBIRCg1XQVJQX1NUQVRFX1VQEAUSEwoPV0FSUF9TVEFURV9ET1dOEAYSFwoTV0FSUF9TVEFURV9ESVNBQkxFRBAHKl8KCldhcnBTb3VyY2USGwoXV0FSUF9TT1VSQ0VfVU5TUEVDSUZJRUQQABIaChZXQVJQX1NPVVJDRV9SRUdJU1RFUkVEEAESGAoUV0FSUF9TT1VSQ0VfSU1QT1JURUQQAkLGAQoVY29tLm1pc3RnYXRlLmFkbWluLnYxQgtDb21tb25Qcm90b1ABWjpnaXRodWIuY29tL21pc3RnYXRlL21pc3RnYXRlL2dlbi9taXN0Z2F0ZS9hZG1pbi92MTthZG1pbnYxogIDTUFYqgIRTWlzdGdhdGUuQWRtaW4uVjHKAhFNaXN0Z2F0ZVxBZG1pblxWMeICHU1pc3RnYXRlXEFkbWluXFYxXEdQQk1ldGFkYXRh6gITTWlzdGdhdGU6OkFkbWluOjpWMWIGcHJvdG8z");
+  fileDesc("Ch5taXN0Z2F0ZS9hZG1pbi92MS9jb21tb24ucHJvdG8SEW1pc3RnYXRlLmFkbWluLnYxIogBCgxTdGF0dXNSZWFzb24SDAoEY29kZRgBIAEoCRI7CgZwYXJhbXMYAiADKAsyKy5taXN0Z2F0ZS5hZG1pbi52MS5TdGF0dXNSZWFzb24uUGFyYW1zRW50cnkaLQoLUGFyYW1zRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIwCg1Qcm90b2NvbENvdW50EhAKCHByb3RvY29sGAEgASgJEg0KBXVzZXJzGAIgASgNItQDCgdJbmJvdW5kEgoKAmlkGAEgASgJEhIKCnByb2ZpbGVfaWQYAiABKAkSFAoMcHJvZmlsZV9uYW1lGAMgASgJEhAKCHByb3RvY29sGAQgASgJEg8KB25vZGVfaWQYBSABKAkSEQoJbm9kZV9uYW1lGAYgASgJEgwKBHBvcnQYByABKA0SFwoPdGxzX3NlcnZlcl9uYW1lGAggASgJEi4KBXN0YXRlGAkgASgOMh8ubWlzdGdhdGUuYWRtaW4udjEuSW5ib3VuZFN0YXRlEhIKCmxhc3RfZXJyb3IYCiABKAkSFwoPY2VydF9waW5fc2hhMjU2GAsgASgJEh8KE2NlcnRfbm90X2FmdGVyX3VuaXgYDCABKANCAjACEjAKA2F3ZxgNIAEoCzIjLm1pc3RnYXRlLmFkbWluLnYxLkF3Z0luYm91bmRTdGF0dXMSDgoGZWdyZXNzGA4gASgJEhUKDXBvcnRfb3ZlcnJpZGUYDyABKA0SIAoYdGxzX3NlcnZlcl9uYW1lX292ZXJyaWRlGBAgASgJEg8KB2VuYWJsZWQYESABKAgSHwoXZGlyZWN0X2luX3N1YnNjcmlwdGlvbnMYEiABKAgSCwoDY2RuGBMgASgIIoQCChBBd2dJbmJvdW5kU3RhdHVzEg8KB2JhY2tlbmQYASABKAkSFwoPYmFja2VuZF92ZXJzaW9uGAIgASgJEhAKCGlmYWNlX3VwGAMgASgIEg0KBXBlZXJzGAQgASgNEhgKEHBlZXJzX2hhbmRzaGFrZW4YBSABKA0SFAoMcGVlcnNfb25saW5lGAYgASgNEiEKFW5ld2VzdF9oYW5kc2hha2VfdW5peBgHIAEoA0ICMAISGgoOdWRwX3J4X3BhY2tldHMYCCABKARCAjACEhsKE3Vua25vd25fcGVlcl9ldmVudHMYCSABKA0SGQoNcmVwb3J0ZWRfdW5peBgKIAEoA0ICMAIijQEKC1dhcnBTdW1tYXJ5EisKBXN0YXRlGAEgASgOMhwubWlzdGdhdGUuYWRtaW4udjEuV2FycFN0YXRlEi0KBnNvdXJjZRgCIAEoDjIdLm1pc3RnYXRlLmFkbWluLnYxLldhcnBTb3VyY2USDAoEY29sbxgDIAEoCRIUCgxhY2NvdW50X3R5cGUYBCABKAkixwIKCVBvcnRDaGVjaxIPCgdub2RlX2lkGAEgASgJEgwKBHBvcnQYAiABKA0SDwoHdmVyZGljdBgDIAEoCRIMCgRzZW50GAQgASgNEgsKA2dvdBgFIAEoDRIYCgxjaGVja2VkX3VuaXgYBiABKANCAjACEhQKCGJhZF91bml4GAcgASgDQgIwAhIOCgZzZW5kZXIYCCABKAkSDgoGcmVhc29uGAkgASgJEhYKDnNlbmRlcl92ZXJkaWN0GAogASgJEhYKDmNvbmZpcm1fc2VuZGVyGAsgASgJEhQKDGNvbmZpcm1fc2VudBgMIAEoDRITCgtjb25maXJtX2dvdBgNIAEoDRIXCg9jb25maXJtX3ZlcmRpY3QYDiABKAkSDQoFYmxhbWUYDyABKAkSHAoQcHJvdG9jb2xfb2tfdW5peBgQIAEoA0ICMAIikAEKCFRjcENoZWNrEgwKBHBvcnQYASABKA0SDAoEcm9sZRgCIAEoCRIMCgRhbHBuGAMgASgIEg8KB3Byb2ZpbGUYBCABKAkSDwoHdmVyZGljdBgFIAEoCRIOCgZyZWFzb24YBiABKAkSDgoGc2VuZGVyGAcgASgJEhgKDGNoZWNrZWRfdW5peBgIIAEoA0ICMAIi8AQKCExpbmtIb3VyEhsKD2hvdXJfc3RhcnRfdW5peBgBIAEoA0ICMAISEAoIY29ubmVjdHMYAiABKA0SDwoHcmVqZWN0cxgDIAEoDRINCgVkcm9wcxgEIAEoDRIOCgZzdGFsbHMYBSABKA0SFAoIb25saW5lX3MYBiABKARCAjACEhQKDHVua25vd25fa2V5cxgHIAEoDRIOCgZoZWxsb3MYCCABKA0SEgoKaGFuZHNoYWtlcxgJIAEoDRIVCg1jbGllbnRfY2xvc2VzGAogASgNEg8KB2ZyZWV6ZXMYCyABKA0SDQoFcXVpZXQYDCABKA0SEAoIYWNjZXB0ZWQYDSABKA0SFgoOaGVsbG9zX2ZvcmVpZ24YDiABKA0SDgoGcnR0X21zGA8gASgNEhUKDWxvc3NfcGVybWlsbGUYECABKA0SEwoLcnR0X3NhbXBsZXMYESABKA0SFQoJcGt0c19zZW50GBIgASgEQgIwAhIVCg1oc191bmZpbmlzaGVkGBMgASgNEhcKD3Rsc19hbGVydHNfc2VudBgUIAEoDRIXCg90bHNfYWxlcnRzX3JlY3YYFSABKA0SGAoQdGxzX2NlcnRfcmVmdXNlZBgWIAEoDRIYChByZWFsaXR5X2ZhbGxiYWNrGBcgASgNEhMKC2F1dGhfZmFpbGVkGBggASgNEhIKCnRjcF9zdGFsbHMYGSABKA0SFgoOdGNwX3N0YWxsc18xNmsYGiABKA0SEwoLaW5pdGlhdGlvbnMYGyABKA0SEQoJcmVzcG9uc2VzGBwgASgNEhsKE3Jlc3BvbnNlc191bm1hdGNoZWQYHSABKA0q1QEKCk5vZGVTdGF0dXMSGwoXTk9ERV9TVEFUVVNfVU5TUEVDSUZJRUQQABIXChNOT0RFX1NUQVRVU19QRU5ESU5HEAESFgoSTk9ERV9TVEFUVVNfT05MSU5FEAISFAoQTk9ERV9TVEFUVVNfRE9XThADEhQKEE5PREVfU1RBVFVTX0JMSVAQBBIaChZOT0RFX1NUQVRVU19OT19UUkFGRklDEAUSGAoUTk9ERV9TVEFUVVNfVVBEQVRJTkcQBhIXChNOT0RFX1NUQVRVU19SRVRJUkVEEAcqSwoDQXBwEhMKD0FQUF9VTlNQRUNJRklFRBAAEgwKCEFQUF9IQVBQEAESDwoLQVBQX0FNTkVaSUEQAhIQCgxBUFBfVEVMRUdSQU0QAyqYAQoMSW5ib3VuZFN0YXRlEh0KGUlOQk9VTkRfU1RBVEVfVU5TUEVDSUZJRUQQABIZChVJTkJPVU5EX1NUQVRFX1BFTkRJTkcQARIYChRJTkJPVU5EX1NUQVRFX0FDVElWRRACEhgKFElOQk9VTkRfU1RBVEVfRkFJTEVEEAMSGgoWSU5CT1VORF9TVEFURV9ESVNBQkxFRBAEKtQBCglXYXJwU3RhdGUSGgoWV0FSUF9TVEFURV9VTlNQRUNJRklFRBAAEh0KGVdBUlBfU1RBVEVfTk9UX0NPTkZJR1VSRUQQARIWChJXQVJQX1NUQVRFX1VOS05PV04QAhIaChZXQVJQX1NUQVRFX1VOQVZBSUxBQkxFEAMSFwoTV0FSUF9TVEFURV9TVEFSVElORxAEEhEKDVdBUlBfU1RBVEVfVVAQBRITCg9XQVJQX1NUQVRFX0RPV04QBhIXChNXQVJQX1NUQVRFX0RJU0FCTEVEEAcqXwoKV2FycFNvdXJjZRIbChdXQVJQX1NPVVJDRV9VTlNQRUNJRklFRBAAEhoKFldBUlBfU09VUkNFX1JFR0lTVEVSRUQQARIYChRXQVJQX1NPVVJDRV9JTVBPUlRFRBACQsYBChVjb20ubWlzdGdhdGUuYWRtaW4udjFCC0NvbW1vblByb3RvUAFaOmdpdGh1Yi5jb20vbWlzdGdhdGUvbWlzdGdhdGUvZ2VuL21pc3RnYXRlL2FkbWluL3YxO2FkbWludjGiAgNNQViqAhFNaXN0Z2F0ZS5BZG1pbi5WMcoCEU1pc3RnYXRlXEFkbWluXFYx4gIdTWlzdGdhdGVcQWRtaW5cVjFcR1BCTWV0YWRhdGHqAhNNaXN0Z2F0ZTo6QWRtaW46OlYxYgZwcm90bzM");
 
 /**
  * Why a status is what it is. The UI localizes `code`; `params` fill the placeholders.
  * Codes: agent_silent {minutes}, host_blip {minutes}, enrollment_pending {expires_in_minutes, expires_unix},
  * enrollment_expired (PENDING without a usable install command), inbound_failed {inbound, error, profile, failed,
  * total} (failed of the node's total enabled profiles do not run), state_drift, clock_skew {seconds}, no_profiles
- * (ONLINE, nothing else wrong, but no enabled profile: nobody gets the node).
+ * (ONLINE, nothing else wrong, but no enabled profile: nobody gets the node), inbound_no_way_in {profile, node, reason}
+ * (hiding the direct server leaves no usable IPv6 twin, CDN host or relay; reason is "awg", "acme_ip" or "no_usable_relay").
  * The health checks add no_traffic {failed, total} (status NO_TRAFFIC: agent on, synthetic
  * checks failing) and doctor_fail {check} (status stays ONLINE, reason shows the worst FAIL of the doctor).
  *
@@ -175,6 +176,20 @@ export type Inbound = Message<"mistgate.admin.v1.Inbound"> & {
    * @generated from field: bool enabled = 17;
    */
   enabled: boolean;
+
+  /**
+   * Whether the server at the node's own address is included in subscriptions. The inbound keeps running when false.
+   *
+   * @generated from field: bool direct_in_subscriptions = 18;
+   */
+  directInSubscriptions: boolean;
+
+  /**
+   * Whether clients reach this inbound through its CDN host instead of the node's address.
+   *
+   * @generated from field: bool cdn = 19;
+   */
+  cdn: boolean;
 };
 
 /**
@@ -399,6 +414,13 @@ export type PortCheck = Message<"mistgate.admin.v1.PortCheck"> & {
    * @generated from field: string blame = 15;
    */
   blame: string;
+
+  /**
+   * Unix time of the latest successful panel protocol probe through an enabled inbound on this port; 0 if its latest result failed or none is stored.
+   *
+   * @generated from field: int64 protocol_ok_unix = 16 [jstype = JS_NUMBER];
+   */
+  protocolOkUnix: bigint;
 };
 
 /**
@@ -577,6 +599,64 @@ export type LinkHour = Message<"mistgate.admin.v1.LinkHour"> & {
    * @generated from field: uint64 pkts_sent = 18 [jstype = JS_NUMBER];
    */
   pktsSent: bigint;
+
+  /**
+   * Agents that list "links/3" (see InboundConnections); device rows carry only the per-key ones (tcp_stalls,
+   * tcp_stalls_16k, initiations, responses, responses_unmatched).
+   *
+   * @generated from field: uint32 hs_unfinished = 19;
+   */
+  hsUnfinished: number;
+
+  /**
+   * @generated from field: uint32 tls_alerts_sent = 20;
+   */
+  tlsAlertsSent: number;
+
+  /**
+   * @generated from field: uint32 tls_alerts_recv = 21;
+   */
+  tlsAlertsRecv: number;
+
+  /**
+   * @generated from field: uint32 tls_cert_refused = 22;
+   */
+  tlsCertRefused: number;
+
+  /**
+   * @generated from field: uint32 reality_fallback = 23;
+   */
+  realityFallback: number;
+
+  /**
+   * @generated from field: uint32 auth_failed = 24;
+   */
+  authFailed: number;
+
+  /**
+   * @generated from field: uint32 tcp_stalls = 25;
+   */
+  tcpStalls: number;
+
+  /**
+   * @generated from field: uint32 tcp_stalls_16k = 26;
+   */
+  tcpStalls16k: number;
+
+  /**
+   * @generated from field: uint32 initiations = 27;
+   */
+  initiations: number;
+
+  /**
+   * @generated from field: uint32 responses = 28;
+   */
+  responses: number;
+
+  /**
+   * @generated from field: uint32 responses_unmatched = 29;
+   */
+  responsesUnmatched: number;
 };
 
 /**

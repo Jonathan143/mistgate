@@ -41,6 +41,7 @@ const (
 	kPathLossy      = "path_lossy"
 	kDeviceLimit    = "device_limit"
 	kRelayDown      = "relay_down"
+	kAgentCrashLoop = "agent_crash_loop"
 )
 
 var kindProto = map[string]adminv1.AlertKind{
@@ -49,16 +50,19 @@ var kindProto = map[string]adminv1.AlertKind{
 	kDoctorWarn: adminv1.AlertKind_ALERT_KIND_DOCTOR_WARN, kDoctorFail: adminv1.AlertKind_ALERT_KIND_DOCTOR_FAIL,
 	kStateDrift: adminv1.AlertKind_ALERT_KIND_STATE_DRIFT, kCertExpiry: adminv1.AlertKind_ALERT_KIND_CERT_EXPIRY,
 	"quota": adminv1.AlertKind_ALERT_KIND_QUOTA, "subscription_shared_suspect": adminv1.AlertKind_ALERT_KIND_SUBSCRIPTION_SHARED_SUSPECT,
-	kUpdateFailed:   adminv1.AlertKind_ALERT_KIND_UPDATE_FAILED,
-	kAccessEnded:    adminv1.AlertKind_ALERT_KIND_ACCESS_ENDED,
-	kUserConnection: adminv1.AlertKind_ALERT_KIND_USER_CONNECTION,
-	kUsersImpacted:  adminv1.AlertKind_ALERT_KIND_USERS_IMPACTED,
-	kTorrent:        adminv1.AlertKind_ALERT_KIND_TORRENT,
-	kPortLossy:      adminv1.AlertKind_ALERT_KIND_PORT_LOSSY,
-	kPathLossy:      adminv1.AlertKind_ALERT_KIND_PATH_LOSSY,
-	kDeviceLimit:    adminv1.AlertKind_ALERT_KIND_DEVICE_LIMIT,
-	kCountryBlocked: adminv1.AlertKind_ALERT_KIND_COUNTRY_BLOCKED,
-	kRelayDown:      adminv1.AlertKind_ALERT_KIND_RELAY_DOWN,
+	kUpdateFailed:     adminv1.AlertKind_ALERT_KIND_UPDATE_FAILED,
+	kAccessEnded:      adminv1.AlertKind_ALERT_KIND_ACCESS_ENDED,
+	kUserConnection:   adminv1.AlertKind_ALERT_KIND_USER_CONNECTION,
+	kUsersImpacted:    adminv1.AlertKind_ALERT_KIND_USERS_IMPACTED,
+	kTorrent:          adminv1.AlertKind_ALERT_KIND_TORRENT,
+	kPortLossy:        adminv1.AlertKind_ALERT_KIND_PORT_LOSSY,
+	kPathLossy:        adminv1.AlertKind_ALERT_KIND_PATH_LOSSY,
+	kDeviceLimit:      adminv1.AlertKind_ALERT_KIND_DEVICE_LIMIT,
+	kCountryBlocked:   adminv1.AlertKind_ALERT_KIND_COUNTRY_BLOCKED,
+	kRelayDown:        adminv1.AlertKind_ALERT_KIND_RELAY_DOWN,
+	kAgentCrashLoop:   adminv1.AlertKind_ALERT_KIND_AGENT_CRASH_LOOP,
+	kScheduledCheck:   adminv1.AlertKind_ALERT_KIND_SCHEDULED_CHECK,
+	kScheduledFailing: adminv1.AlertKind_ALERT_KIND_SCHEDULED_TASK_FAILING,
 }
 
 const (
@@ -67,6 +71,7 @@ const (
 	sevCritical = 3
 
 	flapMin            = 3 // blips and agent restarts in an hour that make a node "flapping"
+	crashLoopMin       = 3 // crash restarts of the agent in 30 minutes that make a crash loop
 	panelEgressSubject = "panel_egress"
 	panelLinkSubject   = "panel_link"
 	panelProbeSubject  = "probe_path"
@@ -198,6 +203,7 @@ func (s *Service) evaluateLocked(ctx context.Context) {
 	var rows []store.DoctorRow
 	var accepts []store.DoctorAccept
 	var portChecks []store.PortCheck
+	var probeSamples []store.CheckSample
 	var pathLosses []store.UDPPathLoss
 	needFleetData := len(sn.nodes) > 0 || !s.cfg.Edge
 	if needFleetData {
@@ -228,6 +234,15 @@ func (s *Service) evaluateLocked(ctx context.Context) {
 			s.log.Warn("health: evaluate", "err", err)
 			return
 		}
+		// The protocol probes only matter to a port that loses packets (addPortLossyConds); a fleet without one spares
+		// the read.
+		if slices.ContainsFunc(portChecks, func(c store.PortCheck) bool { return c.Verdict == "lossy" || c.Verdict == "broken" }) {
+			probeSamples, err = s.st.LatestProbeSamples(ctx, "")
+			if err != nil {
+				s.log.Warn("health: evaluate latest protocol probes", "err", err)
+				return
+			}
+		}
 		pathLosses, err = s.st.UDPPathLosses(ctx, now.Add(-30*time.Hour))
 		if err != nil {
 			s.log.Warn("health: evaluate UDP path losses", "err", err)
@@ -239,7 +254,7 @@ func (s *Service) evaluateLocked(ctx context.Context) {
 		s.log.Warn("health: evaluate", "err", err)
 		return
 	}
-	d := s.derive(ctx, now, sn, indexLiveRows(liveRows), rows, acceptsByNode(accepts), signals, portChecks, active)
+	d := s.derive(ctx, now, sn, indexLiveRows(liveRows), rows, acceptsByNode(accepts), signals, portChecks, probeSamples, active)
 	addPathLossyConds(now, pathLosses, func(c cond) { d.conds[c.key] = c })
 	s.addRelayDownConds(ctx, now, sn, signals.RelayLinks, active, d)
 	s.nhMu.Lock()
@@ -280,7 +295,7 @@ func accepted(r store.DoctorRow, acc map[string]store.DoctorAccept) (store.Docto
 
 // derive computes the conditions that hold now.
 func (s *Service) derive(ctx context.Context, now time.Time, sn *snapshot, live map[string]store.NodeLiveRow, rows []store.DoctorRow, accepts map[string]map[string]store.DoctorAccept,
-	signals store.HealthSignalBatch, portChecks []store.PortCheck, active []store.HealthAlert) *derived {
+	signals store.HealthSignalBatch, portChecks []store.PortCheck, probeSamples []store.CheckSample, active []store.HealthAlert) *derived {
 	d := &derived{conds: map[key]cond{}, accepted: map[key]bool{}, nodes: map[string]bool{}, holdNode: map[string]bool{}, holdDown: map[string]bool{},
 		holdDoctor: map[string]bool{}, holdKeys: map[key]bool{}, superseded: map[key]bool{}, health: map[string]nodeHealth{}}
 	docs := map[string][]store.DoctorRow{}
@@ -501,10 +516,18 @@ func (s *Service) derive(ctx context.Context, now time.Time, sn *snapshot, live 
 				params: map[string]string{"count": strconv.Itoa(f.Count)}})
 		}
 	}
+	// An agent that keeps crashing: three agent_started events in 30 minutes whose params say the previous run ended uncleanly.
+	// The condition is the window itself, so it resolves by itself once the crashes stop.
+	for _, cr := range signals.CrashLoops {
+		if cr.Count >= crashLoopMin && nodeActive[cr.NodeID] {
+			add(cond{key: key{kAgentCrashLoop, cr.NodeID, "agent"}, severity: sevWarning, why: "health.alert.agent_crash_loop.why",
+				params: map[string]string{"count": strconv.Itoa(cr.Count), "window_min": "30", "last_unix": strconv.FormatInt(cr.LastAt.Unix(), 10)}})
+		}
+	}
 	for _, c := range s.extConds(ctx) { // e.g. a paused rollout (update_failed)
 		add(cond{key: key{c.Kind, c.NodeID, c.Subject}, severity: c.Severity, why: c.Why, params: c.Params})
 	}
-	addPortLossyConds(sn, portChecks, add)
+	addPortLossyConds(sn, portChecks, probeSamples, add)
 	activeKeys := make(map[key]bool, len(active))
 	activeAlerts := make(map[key]store.HealthAlert, len(active))
 	for _, alert := range active {
@@ -550,10 +573,14 @@ func cdnHost(t *target) string {
 // addPortLossyConds derives a port alert from each enabled inbound's current port and its latest stored verdict.
 // check_failed remains active alongside this alert: it describes a client-eye failure, while this check measures
 // whether tagged UDP packets arrived at the node.
-func addPortLossyConds(sn *snapshot, checks []store.PortCheck, add func(cond)) {
+func addPortLossyConds(sn *snapshot, checks []store.PortCheck, probeSamples []store.CheckSample, add func(cond)) {
 	type nodePort struct {
 		node string
 		port uint16
+	}
+	latestProbe := make(map[string]store.CheckSample, len(probeSamples))
+	for _, sample := range probeSamples {
+		latestProbe[sample.InboundID] = sample
 	}
 	latest := make(map[nodePort]store.PortCheck, len(checks))
 	for _, check := range checks {
@@ -571,6 +598,14 @@ func addPortLossyConds(sn *snapshot, checks []store.PortCheck, add func(cond)) {
 			port := uint16(inbound.spec.Listen.Port)
 			check, ok := latest[nodePort{node: node.ID, port: port}]
 			if !ok || (check.Verdict != "lossy" && check.Verdict != "broken") {
+				continue
+			}
+			// A current panel probe through this exact inbound takes precedence over UDP delivery from a fleet sender: a hoster's
+			// filter can drop the test datagrams while real clients connect. The latest result counts when it passed after the
+			// UDP check or at most store.PortProbeTrust before it (waiting for the next probe would open the alert for those
+			// minutes and close it again).
+			if sample, ok := latestProbe[inbound.in.ID]; ok && sample.Status == int(adminv1.CheckStatus_CHECK_STATUS_OK) &&
+				store.ProtocolAnswers(sample.At, check.CheckedAt) {
 				continue
 			}
 			sender := check.Sender
@@ -605,14 +640,19 @@ func addPathLossyConds(now time.Time, losses []store.UDPPathLoss, add func(cond)
 		if age < 0 || age >= 30*time.Hour {
 			continue
 		}
-		add(cond{key: key{kPathLossy, loss.SenderID, loss.TargetID}, severity: sevWarning,
-			why: "health.alert.path_lossy.why", params: map[string]string{
-				"node": loss.SenderName, "target": loss.TargetName, "target_id": loss.TargetID,
-				"ports": loss.Ports, "sent": strconv.FormatUint(uint64(loss.Sent), 10),
-				"got": strconv.FormatUint(uint64(loss.Got), 10), "other": loss.OtherSenderName,
-				"other_got": strconv.FormatUint(uint64(loss.OtherGot), 10), "region": healthUDPRegion(loss.SenderCountry),
-				"other_region": healthUDPRegion(loss.OtherSenderCountry), "checked_unix": strconv.FormatInt(loss.CheckedAt.Unix(), 10),
-			}})
+		why, params := "health.alert.path_lossy.why", map[string]string{
+			"node": loss.SenderName, "target": loss.TargetName, "target_id": loss.TargetID,
+			"ports": loss.Ports, "sent": strconv.FormatUint(uint64(loss.Sent), 10),
+			"got": strconv.FormatUint(uint64(loss.Got), 10), "other": loss.OtherSenderName,
+			"other_got": strconv.FormatUint(uint64(loss.OtherGot), 10), "region": healthUDPRegion(loss.SenderCountry),
+			"other_region": healthUDPRegion(loss.OtherSenderCountry), "checked_unix": strconv.FormatInt(loss.CheckedAt.Unix(), 10),
+		}
+		if loss.OpenPorts != "" {
+			// Some ports arrived whole and the lost ones not at all: a filter on the way (often the target hoster's DDoS
+			// protection admitting only UDP 443 from some networks), and checks from this sender cannot pass.
+			why, params["open"] = "health.alert.path_lossy.why.filtered", loss.OpenPorts
+		}
+		add(cond{key: key{kPathLossy, loss.SenderID, loss.TargetID}, severity: sevWarning, why: why, params: params})
 	}
 }
 
@@ -744,7 +784,7 @@ func latest(ts ...time.Time) time.Time {
 
 // checkOrder is the fixed order of agent.proto "CHECK IDS"; unknown ids go after these, by name.
 var checkOrder = []string{"disk_space", "journald_size", "dstate_tasks", "time_sync", "resolver", "ipv6", "foreign_vpn", "foreign_nft",
-	"port_conflicts", "net_baseline", "cert_expiry", "memory_pressure", "cpu_softirq", "kernel_headers", "awg_backend", "warp_path", "unit_generation"}
+	"port_conflicts", "net_baseline", "cert_expiry", "memory_pressure", "cpu_softirq", "kernel_headers", "awg_backend", "warp_path", "unit_generation", "security_updates", "cpu_steal", "conntrack_fill", "agent_fds"}
 
 func checkRank(id string) int {
 	for i, c := range checkOrder {
@@ -857,9 +897,9 @@ func unitGenerationNeedsWarning(rows []store.DoctorRow, unitRow store.DoctorRow)
 }
 
 // transientSkip are the doctor's SKIP codes that mean "not now", not "nothing to check": they hold the check's alert
-// (internal/node/doctor/codes.go: CodeCPUCollecting, CodeDstateCut, CodeSkipTimeout, CodeSkipInternal; the panel does not
-// import the node's package).
-var transientSkip = map[string]bool{"cpu_softirq.collecting": true, "dstate_tasks.interrupted": true, "skip.timeout": true, "skip.internal": true}
+// (internal/node/doctor/codes.go: CodeCPUCollecting, CodeStealCollecting, CodeDstateCut, CodeSkipTimeout, CodeSkipInternal; the
+// panel does not import the node's package).
+var transientSkip = map[string]bool{"cpu_softirq.collecting": true, "cpu_steal.collecting": true, "dstate_tasks.interrupted": true, "skip.timeout": true, "skip.internal": true}
 
 // certWhy is the reason of a certificate alert about one profile: it names the profile and its domain (the agent's
 // own certificate keeps the doctor's general text).
@@ -1023,6 +1063,9 @@ func (s *Service) reconcile(ctx context.Context, now time.Time, d *derived, acti
 		a, _, err := s.st.OpenAlert(ctx, d.conds[k].alert(), reopenWindow, now)
 		if err != nil {
 			return err
+		}
+		if !a.ResolvedAt.IsZero() {
+			continue // closed by an admin and the condition still holds: stays closed, nothing to announce
 		}
 		s.transition(a, false)
 		s.alertEvent(ctx, a, now)

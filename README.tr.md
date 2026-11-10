@@ -27,16 +27,16 @@ Hysteria2, VLESS ve AmneziaWG. İki Go ikili dosyası, SQLite ve systemd.</p>
 
 Paneli bir sunucuya kurar, VPN sunucularınızı ona düğüm olarak eklersiniz. Her kişi tek bir abonelik bağlantısı alır ve uygulaması, kullanabileceği bütün sunucuları kendiliğinden çeker. Panel düğümlerin yapılandırmasını güncel tutar ve onları kontrol eder.
 
-- Düğümü tarayıcıdan, IP adresi ve root parolasıyla eklersiniz. Panel sunucunun SSH anahtarını sabitler, sunucuyu kontrol eder, etkin bir UFW ya da firewalld varsa portları açar ve imzalı ajanı kurar. Tek kullanımlık bir kurulum komutu da olur. [Düğüm ekleme](docs/en/getting-started/add-node.md)
-- Kişi başına tek bağlantı. Mihomo tabanlı uygulamalar (kl!ck, FlClash, Clash Verge Rev) bu bağlantıdan üç protokolün hepsini alır, Happ Hysteria2 ve VLESS'i alır, AmneziaVPN ise kişinin sayfasından her cihaz için ayrı bir anahtar alır. [İstemci uygulamaları](docs/en/guide/client-apps.md)
-- Panel her 5 dakikada bir, tıpkı bir uygulama gibi her sunucuya bağlanır. Her düğümdeki Teşhis 17 sunucu kontrolü yapar ve yedi düzeltme önerir; bunlar ancak siz onayladıktan sonra çalışır. Uyarılar yönetim panelinde görünür ve Telegram'a da gelir. [Sağlık](docs/en/operations/health.md)
-- Bazı ağlardan bir sunucuya ulaşılamıyorsa kişiler ona başka bir düğümünüz üzerinden bağlanır; o düğüm yalnızca şifreli trafiği iletir. Panel yolu açmadan önce kontrol eder, sonra da izlemeye devam eder; düğüm sayfası her giriş yolunu kişilerden sunucuya uzanan bir çizgi olarak çizer. [Aktarıcılar](docs/en/guide/relays.md)
+- Düğümü tarayıcıdan, IP adresiyle, panelin kendi SSH anahtarıyla (sağlayıcınıza bir kez eklersiniz) ya da root parolasıyla eklersiniz. Panel sunucunun SSH anahtarını sabitler, sunucuyu kontrol eder, etkin bir UFW ya da firewalld varsa portları açar ve imzalı ajanı kurar; düğüm kartında parolayı değiştirir ve sunucunun SSH anahtarlarını yönetir. Tek kullanımlık bir kurulum komutu da olur. [Düğüm ekleme](docs/en/getting-started/add-node.md)
+- Kişi başına tek bağlantı. Mihomo tabanlı uygulamalar (kl!ck, FlClash, Clash Verge Rev) bu bağlantıdan üç protokolün hepsini alır, Happ Hysteria2 ve VLESS'i alır, AmneziaVPN ise kişinin sayfasından her cihaz için ayrı bir anahtar alır. Mihomo ve sing-box uygulamaları çalışan bir sunucuya kendileri geçer. [İstemci uygulamaları](docs/en/guide/client-apps.md)
+- Panel her 5 dakikada bir, tıpkı bir uygulama gibi her sunucuya bağlanır. Her düğümdeki Teşhis 21 sunucu kontrolü yapar ve sekiz düzeltme önerir; bunlar ancak siz onayladıktan sonra çalışır. Uyarılar yönetim panelinde görünür ve Telegram'a da gelir. [Sağlık](docs/en/operations/health.md)
+- Bazı ağlardan bir sunucuya ulaşılamıyorsa kişiler ona başka bir düğümünüz üzerinden bağlanır; o düğüm yalnızca şifreli trafiği iletir. Panel yolu açmadan önce kontrol eder, sonra da izlemeye devam eder; düğüm sayfasındaki Giriş yolları, kişilerin sunucuya nasıl ulaştığını gösteren bir grafiktir; Düğümler sayfasında ise tüm düğümlerin haritası vardır. [Aktarıcılar](docs/en/guide/relays.md)
 - İsteğe bağlı olarak, sunucularınızın bir ülkenin içinden açılıp açılmadığını ağ ağ kontrol edebilirsiniz: ev ve mobil ağlarda IPv4 ve IPv6 üzerinden Globalping ölçümleri, gönüllü ve SIM ölçüm noktaları, engelleme listeleri ve kendi düğümünüzden bir TSPU ölçümü. Kaynakların çoğu yalnızca Rusya'da çalışır. [Erişilebilirlik](docs/en/operations/reachability.md)
 - Docker yok, veritabanı sunucusu yok. Panel boştayken 1 vCPU / 1 GB'lık bir sunucuda 16-20 MiB bellek kullanır. [Performans testleri](docs/en/reference/benchmarks.md), Mistgate'in daha yavaş kaldığı yerler dahil.
 - Panelin adresini açan yabancılar bir kamuflaj sitesi görür; yönetim paneli gizli bir yolun ya da ana bilgisayar adının arkasındadır.
-- Yerleşik MCP sunucusu sayesinde bir yapay zekâ ajanı tüm düğümlerin durumunu okuyabilir ve değişiklik planlayabilir; riskli olanlar yönetim panelinde sizin onayınızı bekler. [MCP](docs/en/reference/mcp.md)
+- Yerleşik asistan (kendi anahtarınızla bağladığınız bir bulut modeli) düğümleriniz ve kişiler hakkındaki sorulara yanıt verir ve değişiklikleri sizin uygulayacağınız kartlar olarak hazırlar. MCP, dışarıdaki bir yapay zekâ ajanının düğümlerin durumunu okumasına, düğümler arasındaki yolları sınamasına ve değişiklik planlamasına izin verir; riskli olanlar yönetim panelinde sizin onayınızı bekler. [Asistan](docs/en/guide/assistant.md), [MCP](docs/en/reference/mcp.md)
 
-Henüz olmayanlar: Telegram botu şimdilik yalnızca uyarı gönderir, Cloudflare Workers sürümü de hâlâ bir [önizleme](docs/en/getting-started/install-edge.md). Bazı varsayılanlar Rusya'daki kullanıcılara göre seçilmiştir; hepsi ayarlardan değiştirilebilir.
+Henüz olmayanlar: kendi uygulamamız (planlandı); Telegram botu şimdilik yalnızca uyarı gönderir, Cloudflare Workers sürümü de hâlâ bir [önizleme](docs/en/getting-started/install-edge.md). Bazı varsayılanlar Rusya'daki kullanıcılara göre seçilmiştir; hepsi ayarlardan değiştirilebilir.
 
 ## Protokoller
 
@@ -55,7 +55,7 @@ Bir protokol, ikili dosyalara derlenmiş iki yarıdan oluşur. Panel tarafında 
 
 ## Kararlı mı?
 
-Beta aşamasında ve henüz genç: v0.1.0 etiketi 2026-10-03'te atıldı, v0.1.63 (2026-10-27) ise 64. etiket. 1.0'a kadar API, kayıtlı ayarlar ve düğüm protokolü değişebilir. Sürümler henüz eski sürümlerden otomatik bir yükseltme testinden geçmiyor; bu, [1.0 koşullarından](docs/en/roadmap/status.md) biri.
+Beta aşamasında ve henüz genç: v0.1.0 etiketi 2026-10-03'te atıldı, v0.1.81 ise 82. etiket. 1.0'a kadar API, kayıtlı ayarlar ve düğüm protokolü değişebilir. Sürümler henüz eski sürümlerden otomatik bir yükseltme testinden geçmiyor; bu, [1.0 koşullarından](docs/en/roadmap/status.md) biri.
 
 Ben kendi altı sunucumda, ailem ve arkadaşlarım için kullanıyorum.
 

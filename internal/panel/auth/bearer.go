@@ -22,6 +22,7 @@ import (
 	"github.com/mistgate/mistgate/gen/mistgate/admin/v1/adminv1connect"
 	"github.com/mistgate/mistgate/internal/panel/securitylimit"
 	"github.com/mistgate/mistgate/internal/panel/store"
+	"github.com/mistgate/mistgate/internal/reqid"
 )
 
 // Bearer authentication with API tokens. It is a second way into
@@ -184,6 +185,9 @@ func (s *Service) auditCall(ctx context.Context, p Principal, path string, statu
 	if p.Channel == ChannelMCP {
 		e.Source = store.AuditMCP
 	}
+	if p.Assistant {
+		e.Source = store.AuditAssistant
+	}
 	if ip.IsValid() {
 		e.IP = ip.String()
 	}
@@ -335,6 +339,7 @@ func (s *Service) serveToken(w http.ResponseWriter, r *http.Request, next http.H
 		return
 	}
 	admin := store.Admin{ID: p.ActorID(), DisplayName: tok.Name, Role: profileRole(tok.Profile)}
+	reqid.MarkAuthed(r.Context())
 	ctx := context.WithValue(r.Context(), adminKey{}, admin)
 	ctx = context.WithValue(ctx, principalKey{}, p)
 	ctx = context.WithValue(ctx, procedureKey{}, path)

@@ -330,7 +330,8 @@ func (WarpSource) EnumDescriptor() ([]byte, []int) {
 // Codes: agent_silent {minutes}, host_blip {minutes}, enrollment_pending {expires_in_minutes, expires_unix},
 // enrollment_expired (PENDING without a usable install command), inbound_failed {inbound, error, profile, failed,
 // total} (failed of the node's total enabled profiles do not run), state_drift, clock_skew {seconds}, no_profiles
-// (ONLINE, nothing else wrong, but no enabled profile: nobody gets the node).
+// (ONLINE, nothing else wrong, but no enabled profile: nobody gets the node), inbound_no_way_in {profile, node, reason}
+// (hiding the direct server leaves no usable IPv6 twin, CDN host or relay; reason is "awg", "acme_ip" or "no_usable_relay").
 // The health checks add no_traffic {failed, total} (status NO_TRAFFIC: agent on, synthetic
 // checks failing) and doctor_fail {check} (status stays ONLINE, reason shows the worst FAIL of the doctor).
 type StatusReason struct {
@@ -467,7 +468,11 @@ type Inbound struct {
 	// The configured server-name override, or empty when the profile/node default is used.
 	TlsServerNameOverride string `protobuf:"bytes,16,opt,name=tls_server_name_override,json=tlsServerNameOverride,proto3" json:"tls_server_name_override,omitempty"`
 	// Whether this inbound is enabled in the desired state.
-	Enabled       bool `protobuf:"varint,17,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Enabled bool `protobuf:"varint,17,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// Whether the server at the node's own address is included in subscriptions. The inbound keeps running when false.
+	DirectInSubscriptions bool `protobuf:"varint,18,opt,name=direct_in_subscriptions,json=directInSubscriptions,proto3" json:"direct_in_subscriptions,omitempty"`
+	// Whether clients reach this inbound through its CDN host instead of the node's address.
+	Cdn           bool `protobuf:"varint,19,opt,name=cdn,proto3" json:"cdn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -617,6 +622,20 @@ func (x *Inbound) GetTlsServerNameOverride() string {
 func (x *Inbound) GetEnabled() bool {
 	if x != nil {
 		return x.Enabled
+	}
+	return false
+}
+
+func (x *Inbound) GetDirectInSubscriptions() bool {
+	if x != nil {
+		return x.DirectInSubscriptions
+	}
+	return false
+}
+
+func (x *Inbound) GetCdn() bool {
+	if x != nil {
+		return x.Cdn
 	}
 	return false
 }
@@ -843,9 +862,11 @@ type PortCheck struct {
 	// The confirmation sender's verdict after the relative-loss rule; empty when there was no confirmation run.
 	ConfirmVerdict string `protobuf:"bytes,14,opt,name=confirm_verdict,json=confirmVerdict,proto3" json:"confirm_verdict,omitempty"`
 	// "node" when both runs found loss, "path" when only one did, or empty when unconfirmed or both were clean.
-	Blame         string `protobuf:"bytes,15,opt,name=blame,proto3" json:"blame,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Blame string `protobuf:"bytes,15,opt,name=blame,proto3" json:"blame,omitempty"`
+	// Unix time of the latest successful panel protocol probe through an enabled inbound on this port; 0 if its latest result failed or none is stored.
+	ProtocolOkUnix int64 `protobuf:"varint,16,opt,name=protocol_ok_unix,json=protocolOkUnix,proto3" json:"protocol_ok_unix,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PortCheck) Reset() {
@@ -983,6 +1004,13 @@ func (x *PortCheck) GetBlame() string {
 	return ""
 }
 
+func (x *PortCheck) GetProtocolOkUnix() int64 {
+	if x != nil {
+		return x.ProtocolOkUnix
+	}
+	return 0
+}
+
 // One TCP port of a node in the port check (design/vless.md section 7.4): does a connection reach Mistgate itself.
 type TcpCheck struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1117,8 +1145,21 @@ type LinkHour struct {
 	LossPermille  uint32 `protobuf:"varint,16,opt,name=loss_permille,json=lossPermille,proto3" json:"loss_permille,omitempty"`
 	RttSamples    uint32 `protobuf:"varint,17,opt,name=rtt_samples,json=rttSamples,proto3" json:"rtt_samples,omitempty"`
 	PktsSent      uint64 `protobuf:"varint,18,opt,name=pkts_sent,json=pktsSent,proto3" json:"pkts_sent,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Agents that list "links/3" (see InboundConnections); device rows carry only the per-key ones (tcp_stalls,
+	// tcp_stalls_16k, initiations, responses, responses_unmatched).
+	HsUnfinished       uint32 `protobuf:"varint,19,opt,name=hs_unfinished,json=hsUnfinished,proto3" json:"hs_unfinished,omitempty"`
+	TlsAlertsSent      uint32 `protobuf:"varint,20,opt,name=tls_alerts_sent,json=tlsAlertsSent,proto3" json:"tls_alerts_sent,omitempty"`
+	TlsAlertsRecv      uint32 `protobuf:"varint,21,opt,name=tls_alerts_recv,json=tlsAlertsRecv,proto3" json:"tls_alerts_recv,omitempty"`
+	TlsCertRefused     uint32 `protobuf:"varint,22,opt,name=tls_cert_refused,json=tlsCertRefused,proto3" json:"tls_cert_refused,omitempty"`
+	RealityFallback    uint32 `protobuf:"varint,23,opt,name=reality_fallback,json=realityFallback,proto3" json:"reality_fallback,omitempty"`
+	AuthFailed         uint32 `protobuf:"varint,24,opt,name=auth_failed,json=authFailed,proto3" json:"auth_failed,omitempty"`
+	TcpStalls          uint32 `protobuf:"varint,25,opt,name=tcp_stalls,json=tcpStalls,proto3" json:"tcp_stalls,omitempty"`
+	TcpStalls_16K      uint32 `protobuf:"varint,26,opt,name=tcp_stalls_16k,json=tcpStalls16k,proto3" json:"tcp_stalls_16k,omitempty"`
+	Initiations        uint32 `protobuf:"varint,27,opt,name=initiations,proto3" json:"initiations,omitempty"`
+	Responses          uint32 `protobuf:"varint,28,opt,name=responses,proto3" json:"responses,omitempty"`
+	ResponsesUnmatched uint32 `protobuf:"varint,29,opt,name=responses_unmatched,json=responsesUnmatched,proto3" json:"responses_unmatched,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *LinkHour) Reset() {
@@ -1277,6 +1318,83 @@ func (x *LinkHour) GetPktsSent() uint64 {
 	return 0
 }
 
+func (x *LinkHour) GetHsUnfinished() uint32 {
+	if x != nil {
+		return x.HsUnfinished
+	}
+	return 0
+}
+
+func (x *LinkHour) GetTlsAlertsSent() uint32 {
+	if x != nil {
+		return x.TlsAlertsSent
+	}
+	return 0
+}
+
+func (x *LinkHour) GetTlsAlertsRecv() uint32 {
+	if x != nil {
+		return x.TlsAlertsRecv
+	}
+	return 0
+}
+
+func (x *LinkHour) GetTlsCertRefused() uint32 {
+	if x != nil {
+		return x.TlsCertRefused
+	}
+	return 0
+}
+
+func (x *LinkHour) GetRealityFallback() uint32 {
+	if x != nil {
+		return x.RealityFallback
+	}
+	return 0
+}
+
+func (x *LinkHour) GetAuthFailed() uint32 {
+	if x != nil {
+		return x.AuthFailed
+	}
+	return 0
+}
+
+func (x *LinkHour) GetTcpStalls() uint32 {
+	if x != nil {
+		return x.TcpStalls
+	}
+	return 0
+}
+
+func (x *LinkHour) GetTcpStalls_16K() uint32 {
+	if x != nil {
+		return x.TcpStalls_16K
+	}
+	return 0
+}
+
+func (x *LinkHour) GetInitiations() uint32 {
+	if x != nil {
+		return x.Initiations
+	}
+	return 0
+}
+
+func (x *LinkHour) GetResponses() uint32 {
+	if x != nil {
+		return x.Responses
+	}
+	return 0
+}
+
+func (x *LinkHour) GetResponsesUnmatched() uint32 {
+	if x != nil {
+		return x.ResponsesUnmatched
+	}
+	return 0
+}
+
 var File_mistgate_admin_v1_common_proto protoreflect.FileDescriptor
 
 const file_mistgate_admin_v1_common_proto_rawDesc = "" +
@@ -1290,7 +1408,7 @@ const file_mistgate_admin_v1_common_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"A\n" +
 	"\rProtocolCount\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x14\n" +
-	"\x05users\x18\x02 \x01(\rR\x05users\"\xe1\x04\n" +
+	"\x05users\x18\x02 \x01(\rR\x05users\"\xab\x05\n" +
 	"\aInbound\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1311,7 +1429,9 @@ const file_mistgate_admin_v1_common_proto_rawDesc = "" +
 	"\x06egress\x18\x0e \x01(\tR\x06egress\x12#\n" +
 	"\rport_override\x18\x0f \x01(\rR\fportOverride\x127\n" +
 	"\x18tls_server_name_override\x18\x10 \x01(\tR\x15tlsServerNameOverride\x12\x18\n" +
-	"\aenabled\x18\x11 \x01(\bR\aenabled\"\x8f\x03\n" +
+	"\aenabled\x18\x11 \x01(\bR\aenabled\x126\n" +
+	"\x17direct_in_subscriptions\x18\x12 \x01(\bR\x15directInSubscriptions\x12\x10\n" +
+	"\x03cdn\x18\x13 \x01(\bR\x03cdn\"\x8f\x03\n" +
 	"\x10AwgInboundStatus\x12\x18\n" +
 	"\abackend\x18\x01 \x01(\tR\abackend\x12'\n" +
 	"\x0fbackend_version\x18\x02 \x01(\tR\x0ebackendVersion\x12\x19\n" +
@@ -1328,7 +1448,7 @@ const file_mistgate_admin_v1_common_proto_rawDesc = "" +
 	"\x05state\x18\x01 \x01(\x0e2\x1c.mistgate.admin.v1.WarpStateR\x05state\x125\n" +
 	"\x06source\x18\x02 \x01(\x0e2\x1d.mistgate.admin.v1.WarpSourceR\x06source\x12\x12\n" +
 	"\x04colo\x18\x03 \x01(\tR\x04colo\x12!\n" +
-	"\faccount_type\x18\x04 \x01(\tR\vaccountType\"\xbf\x03\n" +
+	"\faccount_type\x18\x04 \x01(\tR\vaccountType\"\xed\x03\n" +
 	"\tPortCheck\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\rR\x04port\x12\x18\n" +
@@ -1346,7 +1466,8 @@ const file_mistgate_admin_v1_common_proto_rawDesc = "" +
 	"\vconfirm_got\x18\r \x01(\rR\n" +
 	"confirmGot\x12'\n" +
 	"\x0fconfirm_verdict\x18\x0e \x01(\tR\x0econfirmVerdict\x12\x14\n" +
-	"\x05blame\x18\x0f \x01(\tR\x05blame\"\xd1\x01\n" +
+	"\x05blame\x18\x0f \x01(\tR\x05blame\x12,\n" +
+	"\x10protocol_ok_unix\x18\x10 \x01(\x03B\x020\x02R\x0eprotocolOkUnix\"\xd1\x01\n" +
 	"\bTcpCheck\x12\x12\n" +
 	"\x04port\x18\x01 \x01(\rR\x04port\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x12\n" +
@@ -1355,7 +1476,7 @@ const file_mistgate_admin_v1_common_proto_rawDesc = "" +
 	"\averdict\x18\x05 \x01(\tR\averdict\x12\x16\n" +
 	"\x06reason\x18\x06 \x01(\tR\x06reason\x12\x16\n" +
 	"\x06sender\x18\a \x01(\tR\x06sender\x12%\n" +
-	"\fchecked_unix\x18\b \x01(\x03B\x020\x02R\vcheckedUnix\"\xaa\x04\n" +
+	"\fchecked_unix\x18\b \x01(\x03B\x020\x02R\vcheckedUnix\"\xcb\a\n" +
 	"\bLinkHour\x12*\n" +
 	"\x0fhour_start_unix\x18\x01 \x01(\x03B\x020\x02R\rhourStartUnix\x12\x1a\n" +
 	"\bconnects\x18\x02 \x01(\rR\bconnects\x12\x18\n" +
@@ -1378,7 +1499,20 @@ const file_mistgate_admin_v1_common_proto_rawDesc = "" +
 	"\rloss_permille\x18\x10 \x01(\rR\flossPermille\x12\x1f\n" +
 	"\vrtt_samples\x18\x11 \x01(\rR\n" +
 	"rttSamples\x12\x1f\n" +
-	"\tpkts_sent\x18\x12 \x01(\x04B\x020\x02R\bpktsSent*\xd5\x01\n" +
+	"\tpkts_sent\x18\x12 \x01(\x04B\x020\x02R\bpktsSent\x12#\n" +
+	"\rhs_unfinished\x18\x13 \x01(\rR\fhsUnfinished\x12&\n" +
+	"\x0ftls_alerts_sent\x18\x14 \x01(\rR\rtlsAlertsSent\x12&\n" +
+	"\x0ftls_alerts_recv\x18\x15 \x01(\rR\rtlsAlertsRecv\x12(\n" +
+	"\x10tls_cert_refused\x18\x16 \x01(\rR\x0etlsCertRefused\x12)\n" +
+	"\x10reality_fallback\x18\x17 \x01(\rR\x0frealityFallback\x12\x1f\n" +
+	"\vauth_failed\x18\x18 \x01(\rR\n" +
+	"authFailed\x12\x1d\n" +
+	"\n" +
+	"tcp_stalls\x18\x19 \x01(\rR\ttcpStalls\x12$\n" +
+	"\x0etcp_stalls_16k\x18\x1a \x01(\rR\ftcpStalls16k\x12 \n" +
+	"\vinitiations\x18\x1b \x01(\rR\vinitiations\x12\x1c\n" +
+	"\tresponses\x18\x1c \x01(\rR\tresponses\x12/\n" +
+	"\x13responses_unmatched\x18\x1d \x01(\rR\x12responsesUnmatched*\xd5\x01\n" +
 	"\n" +
 	"NodeStatus\x12\x1b\n" +
 	"\x17NODE_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +

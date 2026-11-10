@@ -31,6 +31,7 @@ const (
 	capIPv6Addr     = "ipv6-addr/1"   // NodeSettings.ipv6_addresses
 	capWSLink       = "ws-link/1"
 	capDecoy        = "decoy/1"
+	capNetworks     = "nets/1"
 )
 
 type agentService struct{ f *Fleet }
@@ -555,6 +556,9 @@ func sessionCloseError(close *SessionClose) error {
 func helloInfo(h *agentv1.Hello) store.HelloInfo {
 	info := store.HelloInfo{AgentVersion: clip(h.AgentVersion, 64), APIVersion: h.ApiVersion, Instance: h.InstanceId,
 		Built: h.Built, Caps: capabilities(h), LastUpdateJSON: lastUpdateJSON(h.LastUpdate)}
+	if slices.Contains(info.Caps, capNetworks) {
+		info.NetworksDBSHA256 = validNetworksDigest(h.NetworksDbSha256)
+	}
 	if slices.Contains(info.Caps, capDecoy) {
 		switch h.DecoyMode {
 		case "builtin":
@@ -682,6 +686,15 @@ func settingsSig(s *agentv1.NodeSettings) string {
 	if s.Ipv6AddressesManaged { // absent for an agent without ipv6-addr/1: its signature stays what it was
 		sig += "|ipv6-addr=" + strings.Join(s.Ipv6Addresses, ",")
 	}
+	if s.Networks != 0 {
+		sig += fmt.Sprintf("|networks=%d", s.Networks)
+	}
+	if s.NetworksDbName != "" {
+		sig += "|networks-db-name=" + s.NetworksDbName
+	}
+	if s.NetworksDbSha256 != "" {
+		sig += "|networks-db-sha256=" + s.NetworksDbSha256
+	}
 	return sig
 }
 
@@ -758,6 +771,13 @@ func (f *Fleet) askWithLive(ctx context.Context, nodeID string, wait time.Durati
 	if build != nil {
 		frame = build(id)
 	}
+	return f.askFrame(ctx, nodeID, id, frame, wait, knownLive)
+}
+
+func (f *Fleet) askFrame(ctx context.Context, nodeID, id string, frame *agentv1.ConnectResponse, wait time.Duration, knownLive *store.NodeLiveRow) (*agentv1.ConnectRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if requestKind(frame) == 0 {
 		return nil, errNoAnswer
 	}
@@ -803,12 +823,27 @@ func (f *Fleet) commandWithLive(ctx context.Context, nodeID string, wait time.Du
 	return nil, errLinkLost
 }
 
+func (f *Fleet) commandWithRequestID(ctx context.Context, nodeID, requestID string, wait time.Duration, frame *agentv1.ConnectResponse) (*agentv1.CommandResult, error) {
+	reply, err := f.askFrame(ctx, nodeID, requestID, frame, wait, nil)
+	if err != nil {
+		return nil, err
+	}
+	if result := reply.GetCommandResult(); result != nil {
+		return result, nil
+	}
+	return nil, errLinkLost
+}
+
 func requestOfflineError(frame *agentv1.ConnectResponse) error {
 	if frame != nil && (frame.GetUpdateAgent() != nil || frame.GetRollbackAgent() != nil) {
 		return connect.NewError(connect.CodeFailedPrecondition, errors.New("node is offline"))
 	}
 	return errNodeOffline
 }
+
+// capDebug: the agent can capture its debug log on request (agent.proto "DEBUG CAPTURE").
+const capDebug = "debug/1"
+const capDebug2 = "debug/2"
 
 func requestCapability(frame *agentv1.ConnectResponse, linkOnly bool) (capability, message string) {
 	updateCapability := capUpdate
@@ -830,6 +865,17 @@ func requestCapability(frame *agentv1.ConnectResponse, linkOnly bool) (capabilit
 		return capUDPCheck, "agent too old"
 	case frame.GetHttpMark() != nil, frame.GetTcpProbe() != nil:
 		return capTCPCheck, "agent too old"
+	case frame.GetPathTrace() != nil:
+		return capProbe, "agent too old"
+	case frame.GetSpeedTest() != nil:
+		return capSpeed, "agent too old"
+	case frame.GetDebugCapture() != nil:
+		for _, source := range frame.GetDebugCapture().GetSources() {
+			if source == "kernel" {
+				return capDebug2, "this node's agent is too old for the kernel source: update the node"
+			}
+		}
+		return capDebug, "agent too old"
 	case frame.GetCountryProbe() != nil:
 		return capCountryProbe, "agent too old"
 	case frame.GetSetDecoy() != nil:

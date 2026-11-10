@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
@@ -266,10 +267,11 @@ var (
 )
 
 var auditSources = map[adminv1.AuditSource]string{
-	adminv1.AuditSource_AUDIT_SOURCE_PANEL: store.AuditPanel,
-	adminv1.AuditSource_AUDIT_SOURCE_BOT:   store.AuditBot,
-	adminv1.AuditSource_AUDIT_SOURCE_MCP:   store.AuditMCP,
-	adminv1.AuditSource_AUDIT_SOURCE_API:   store.AuditAPI,
+	adminv1.AuditSource_AUDIT_SOURCE_PANEL:     store.AuditPanel,
+	adminv1.AuditSource_AUDIT_SOURCE_BOT:       store.AuditBot,
+	adminv1.AuditSource_AUDIT_SOURCE_MCP:       store.AuditMCP,
+	adminv1.AuditSource_AUDIT_SOURCE_API:       store.AuditAPI,
+	adminv1.AuditSource_AUDIT_SOURCE_ASSISTANT: store.AuditAssistant,
 }
 
 // ListAudit pages through the audit log (owner only), optionally for one source.
@@ -301,6 +303,16 @@ func (s *Service) ListAudit(ctx context.Context, req *connect.Request[adminv1.Li
 	default:
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("unknown audit kind"))
 	}
+	if req.Msg.FailedOnly {
+		q.Failed = true
+	}
+	if req.Msg.Hours > 0 {
+		q.Since = s.now().Add(-time.Duration(min(req.Msg.Hours, 8760)) * time.Hour)
+	}
+	if len(req.Msg.ActionContains) > 100 || len(req.Msg.ActorContains) > 100 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("action_contains and actor_contains are at most 100 characters"))
+	}
+	q.Contains, q.Actor = req.Msg.ActionContains, req.Msg.ActorContains
 	rows, err := s.st.ListAuditQuery(ctx, q)
 	if err != nil {
 		s.log.Error("list audit", "err", err)

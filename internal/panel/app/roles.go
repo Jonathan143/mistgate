@@ -14,6 +14,7 @@ import (
 	"github.com/mistgate/mistgate/internal/panel/httpserver"
 	nodeprovision "github.com/mistgate/mistgate/internal/panel/provision"
 	"github.com/mistgate/mistgate/internal/panel/subs"
+	"github.com/mistgate/mistgate/internal/panel/update"
 	"github.com/mistgate/mistgate/internal/statehash"
 )
 
@@ -63,6 +64,8 @@ func Build(c Config) (*Panel, error) {
 	if err != nil {
 		return nil, err
 	}
+	k.newAssistantService()
+	k.newTasksService()
 	c = k.c
 	parts := k.base.newSubParts(true)
 	prov, bkp, err := k.provisionAndBackup()
@@ -87,6 +90,8 @@ func BuildAdmin(c Config) (*Panel, error) {
 	if err != nil {
 		return nil, err
 	}
+	k.newAssistantService()
+	k.newTasksService()
 	parts := k.base.newSubParts(true)
 	prov, bkp, err := k.provisionAndBackup()
 	if err != nil {
@@ -169,7 +174,7 @@ func BuildPublic(c Config) (*Panel, error) {
 	if err != nil {
 		return nil, err
 	}
-	acc, err = access.New(b.st, b.vlt, b.reg, fl, fl, b.accessConfig(fl))
+	acc, err = access.New(b.st, b.vlt, b.reg, fl, fl, b.accessConfig(fl, nil))
 	if err != nil {
 		return nil, err
 	}
@@ -224,16 +229,24 @@ func (k *core) adminConfig(parts subParts, prov *nodeprovision.Service, bkp *bac
 		func() (string, http.Handler) { return k.bl.Handler() },
 		func() (string, http.Handler) { return k.cp.Handler() },
 		func() (string, http.Handler) { return probe.Handler() },
+		bkp.DownloadHandler,
 	} {
 		path, handler := h()
 		cfg.AdminHandlers = append(cfg.AdminHandlers, httpserver.AdminHandler{Path: path, Handler: handler})
 	}
+	cfg.AdminHandlers = append(cfg.AdminHandlers, probeAdminHandlers(k.fl)...) // probes between nodes: the VPS only
 	// API tokens and the owner's approvals, then the MCP endpoint over the same admin API.
 	cfg.AdminHandlers = append(cfg.AdminHandlers, integrationHandlers(k.authSvc)...)
+	if path, handler := k.assistantHandler(); path != "" {
+		cfg.AdminHandlers = append(cfg.AdminHandlers, httpserver.AdminHandler{Path: path, Handler: handler})
+	}
+	cfg.AdminAPIReady = func(api http.Handler) { k.attachAssistantRuntime(api) }
 	cfg.AdminPages = []httpserver.AdminPage{{Path: nodeprovision.AdminPagePath, Handler: forwardPage(forward, prov.PageHandler())}}
 	cfg.MCP = mcpEndpoint(k.authSvc, k.st, k.log, k.tg.PlanWaiting, k.c.Clock)
 	// The admin's framed preview of the public user page (session and read role are checked by the server).
 	cfg.UserPagePreview = subs.PreviewHandler(k.acc, parts.cfg)
+	k.addOps(&cfg)
+	k.addTasks(&cfg)
 	return cfg
 }
 
@@ -246,6 +259,14 @@ func (k *core) provisionAndBackup() (*nodeprovision.Service, *backup.Service, er
 	bkp, err := backup.New(backup.Config{
 		Store: k.st, Vault: k.vlt, DataDir: k.c.DataDir, MasterKey: k.c.MasterKey,
 		Edge: k.edge, StepUp: k.authSvc.RequireStepUp, OnResult: backupResult(k.tg), Log: k.log,
+		RestorePanelData: func(ctx context.Context, request backup.RestoreRequest, beforeStart func() error) error {
+			return k.upd.StartPanelRestore(ctx, update.PanelRestoreRequest{
+				StageDir: request.StageDir, Source: request.Source, FileName: request.FileName,
+				MadeByVersion: request.MadeByVersion, RequestedUnix: request.RequestedUnix,
+			}, beforeStart)
+		},
+		DeleteKeptData:       k.upd.DeleteKeptData,
+		RestoreHelperRunning: k.upd.PanelUpdateRunning,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -287,7 +308,7 @@ func (k *core) finish(cfg httpserver.Config, prov *nodeprovision.Service, bkp *b
 	p.Handler, p.Server, p.Provision, p.Backup, p.Surface = srv.Public(), srv, prov, bkp, surfaceOf(cfg)
 	if jobs {
 		p.BackgroundJobs = backgroundJobs(k.c, jobServices{fleet: k.fl, access: k.acc, health: k.hl, blocklist: k.bl, probe: k.cp,
-			cheburcheck: k.cc, bsbord: k.bs, update: k.upd, backup: bkp, telegram: k.tg, provision: prov, store: k.st, log: k.log})
+			cheburcheck: k.cc, bsbord: k.bs, update: k.upd, backup: bkp, telegram: k.tg, assistant: k.assistantRetention, tasks: k.sched, provision: prov, store: k.st, log: k.log})
 	}
 	return p, nil
 }

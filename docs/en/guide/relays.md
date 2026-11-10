@@ -36,13 +36,15 @@ A relay in a country with censorship is under that country's law: its hoster may
 4. The panel checks the **path**: a third node (never the entry or the exit; the panel itself only when no node can) reaches the exit's server **through the entry's port**.
 5. Only then is the relay *Works*, and only then does the second server appear in subscriptions. A relay that fails either check is switched off again and the dialog says which stage failed.
 
+People then have both the node's own server and the one through the entry. To give them only the one through the entry, turn the server off under **In subscriptions** in **Direct** on the exit node's **Ways in** tab (see [Nodes](nodes.md#direct)): it keeps running for the relay.
+
 Accounting stays on the exit: traffic, quotas, speed limits, devices and [torrent protection](torrent-protection.md) work per person as before. The exit sees the entry's address instead of the person's. The traffic crosses the entry twice (from people and to the exit), so the entry's own traffic limit and load count both, and the latency is the person to the entry plus the entry to the exit. MTU does not change.
 
 ## Add a relay
 
 1. Update the entry node's agent if **Updates** says so: older agents cannot forward ("Update the node agent to add relays"). The server's firewall must allow forwarded traffic; if it drops it (`FORWARD` policy `DROP`, as UFW and Docker set by default) the relay stays down and the card says so.
 2. Open the node people cannot reach: **Nodes** → that node → **Ways in** → **Add a way in…**. When the node is dark, the dialog starts: "From Russia, de1 does not open on MTS. Give those people another way in — the node and its keys stay the same."
-3. Choose **Through another node**: "People connect to a node their network sees; it passes their traffic to de1 unchanged." The best choice is hinted ("Good fit: msk1, seen from MTS"). **IPv6 entry** is greyed out for now, with the reason.
+3. Choose **Through another node**: "People connect to a node their network sees; it passes their traffic to de1 unchanged." The best choice is hinted ("Good fit: msk1, seen from MTS"). The other choice is the [IPv6 entry](nodes.md#ipv6-entry); it is greyed out, with the reason, when the node cannot take one.
 4. Pick the entry (**Through which node**). **Good fits: seen from MTS** come first, then **Other nodes**; each shows its country code, whether people see it and, where the TSPU probe runs from it, whether it reaches de1. A node that already passes servers of de1 says "Already passes on 2 servers of de1".
 5. Tick the servers to relay. Each has a port on the entry (**auto** is the exit's port if free, else a free one). A server that cannot be relayed is grey with the reason.
 6. **Check and turn on** runs both checks and switches the relay on. **Only check** runs the leg and adds the relay switched off; turn it on with **Turn on** in its row within 15 minutes, or check again (switching on needs a leg check that passed less than 15 minutes ago). The dialog shows the progress and the result per server; **Back** returns to the choice of the node.

@@ -1,11 +1,12 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Link, Outlet, useRouter, useRouterState } from "@tanstack/react-router";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AddNodeProvider } from "@/components/add-node";
 import { StepUpProvider } from "@/components/step-up";
 import { Brand, Logo, Wordmark } from "@/components/brand";
 import { navKey, sections, type SectionId } from "@/components/nav";
+import { ChatDock } from "@/components/assistant/chat";
 import { LangToggle, ThemeToggle } from "@/components/prefs";
 import { StaleToast } from "@/components/stale-toast";
 import { UpdateToast } from "@/components/update-toast";
@@ -20,6 +21,9 @@ import { healthKind, problemCount, useFleetHealth, useFleetSummary } from "@/lib
 import { useAwaitingApprovals } from "@/lib/integrations";
 import { basepath } from "@/lib/api";
 import { meQuery, useSignOut } from "@/lib/session";
+import { noteNavigation, usePageTransition } from "@/components/fx/page";
+import { setEffectsAllowed, useEffectKind, useEffectsEnabled } from "@/lib/effects";
+import { useEdition } from "@/lib/edition";
 import { cx } from "@/lib/cx";
 
 // The palette (and Base UI's dialog behind it) is loaded the first time it is opened.
@@ -47,9 +51,21 @@ export function Shell() {
 
 function ShellFrame() {
   const t = useT();
+  // the Cloudflare edition has no reveal animation: set before the effects below read it
+  const edge = useEdition().edge;
+  setEffectsAllowed(!edge);
   const [palette, setPalette] = useState(false);
   const [paletteLoaded, setPaletteLoaded] = useState(false);
   // matches: root, app layout, then the section route: the key that restarts the enter animation
+  // the page sweep: once per pathname change (a tab switch is a search change: it does not), and once when the shell first appears
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const router = useRouter();
+  useEffect(() => router.subscribe("onBeforeNavigate", noteNavigation), [router]);
+  const effectsOn = useEffectsEnabled();
+  const pagesOn = useEffectKind("pages");
+  const pageFx = effectsOn && pagesOn;
+  const content = useRef<HTMLDivElement>(null);
+  usePageTransition(content, pathname, pageFx);
   const section = useRouterState({ select: (s) => s.matches[2]?.routeId ?? "" });
 
   function openPalette() {
@@ -86,12 +102,13 @@ function ShellFrame() {
       {/* one width rule for every screen: a centred column of at most 1360px, side padding that grows with the window.
           A screen that needs more (a wide table) puts an element with the class "app-wide" inside and the column lifts its cap. */}
       <main id="main" tabIndex={-1} className="outline-none px-4 pt-1.5 pb-24 md:px-[clamp(24px,4vw,64px)] md:pt-6 md:pb-8">
-        <div key={section} className="screen-enter mx-auto max-w-[1360px] has-[.app-wide]:max-w-none">
+        <div key={section} ref={content} className="screen-enter mx-auto max-w-[1360px] has-[.app-wide]:max-w-none">
           <Outlet />
         </div>
       </main>
 
       <Dock />
+      <ChatDock />
       <UpdateToast />
       <StaleToast />
       {paletteLoaded && (
@@ -130,7 +147,8 @@ function useProblemsBadge(): { n: number; tone: "danger" | "warn" } {
 const linkCls =
   "flex h-[34px] items-center gap-2.5 rounded-ctl px-2.5 text-[13px] font-semibold text-muted transition-colors duration-200 data-[status=active]:bg-surface-2 data-[status=active]:font-bold data-[status=active]:text-fg";
 
-function Sidebar() {
+/** Exported for the dev kit's page frame (dev-kit-bulk.tsx); the app shows it only here. */
+export function Sidebar() {
   const t = useT();
   const signOut = useSignOut();
   const { data } = useSuspenseQuery(meQuery);
@@ -160,7 +178,7 @@ function Sidebar() {
                 <span className="min-w-0 flex-1 truncate">{t(navKey(s.id))}</span>
                 {!!count && <span className="font-mono text-[11px] font-medium text-muted">{count}</span>}
                 {s.id === "health" && problems.n > 0 && <CountBadge n={problems.n} tone={problems.tone} label={t.n("health.problems", problems.n)} />}
-                {s.id === "integrations" && approvals > 0 && <CountBadge n={approvals} tone="warn" label={t.n("int.badge", approvals)} />}
+                {s.id === "ai" && approvals > 0 && <CountBadge n={approvals} tone="warn" label={t.n("int.badge", approvals)} />}
               </Link>
             </div>
           );
@@ -208,7 +226,7 @@ function TopBar({ onSearch }: { onSearch: () => void }) {
   const t = useT();
   const health = useFleetHealth();
   return (
-    <header className="sticky top-0 z-10 hidden h-14 items-center gap-3 border-b border-line bg-canvas px-5 md:flex">
+    <header data-fx-chrome="top" className="sticky top-0 z-10 hidden h-14 items-center gap-3 border-b border-line bg-canvas px-5 md:flex">
       {/* the whole placeholder and the shortcut fit beside the other controls from 1280 px; narrower, the search is the
           icon button of the phone, as tall as its neighbours, rather than a box that cuts its own words */}
       <button
@@ -290,7 +308,7 @@ function MobileHeader({ onSearch }: { onSearch: () => void }) {
   const t = useT();
   const health = useFleetHealth();
   return (
-    <header className="sticky top-0 z-10 flex h-14 items-center gap-2.5 bg-canvas px-4 pt-2 md:hidden">
+    <header data-fx-chrome="top" className="sticky top-0 z-10 flex h-14 items-center gap-2.5 bg-canvas px-4 pt-2 md:hidden">
       <Logo size={32} />
       <Wordmark size={16} />
       <div className="flex-1" />
@@ -313,8 +331,8 @@ function MobileHeader({ onSearch }: { onSearch: () => void }) {
 const tabCls =
   "relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[14px] text-[11px] font-bold text-muted transition-colors duration-300 data-[status=active]:bg-surface-2 data-[status=active]:text-fg";
 
-/** Floating dock: three sections and "More", which opens a sheet with the rest. */
-function Dock() {
+/** Floating dock: three sections and "More", which opens a sheet with the rest. The Nodes page's bulk bar takes its place (index.css). */
+export function Dock() {
   const t = useT();
   const [more, setMore] = useState(false);
   const problems = useProblemsBadge();
@@ -327,8 +345,9 @@ function Dock() {
 
   return (
     <nav
+      data-dock
       aria-label={t("nav.main")}
-      className="fixed inset-x-3.5 bottom-3.5 z-10 flex h-[60px] gap-1 rounded-dock border border-line bg-dock p-1.5 shadow-(--shadow-dock) backdrop-blur-[16px] md:hidden"
+      data-fx-chrome="bottom" className="fixed inset-x-3.5 bottom-3.5 z-10 flex h-[60px] gap-1 rounded-dock border border-line bg-dock p-1.5 shadow-(--shadow-dock) backdrop-blur-[16px] md:hidden"
     >
       {primary.map((s) => (
         <Link key={s.id} to={s.to} activeOptions={{ exact: s.to === "/" }} className={tabCls}>
@@ -360,7 +379,7 @@ function Dock() {
                 <NavIcon name={s.id} size={20} />
                 <span className="flex-1">{t(navKey(s.id))}</span>
                 {s.id === "health" && problems.n > 0 && <CountBadge n={problems.n} tone={problems.tone} label={t.n("health.problems", problems.n)} />}
-                {s.id === "integrations" && approvals > 0 && <CountBadge n={approvals} tone="warn" label={t.n("int.badge", approvals)} />}
+                {s.id === "ai" && approvals > 0 && <CountBadge n={approvals} tone="warn" label={t.n("int.badge", approvals)} />}
                 <span aria-hidden className="text-base text-faint">
                   ›
                 </span>

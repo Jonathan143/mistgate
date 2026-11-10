@@ -109,6 +109,7 @@ export function alertTitle(t: T, a: Alert): string {
   if (a.kind === AlertKind.CHECK_FAILED && (a.subject === "panel_egress" || a.subject === "probe_path")) key += "." + a.subject;
   if (a.kind === AlertKind.NODE_DOWN && a.subject === "panel_link") key += ".panel_link"; // fleet-wide, no node to name
   if (a.kind === AlertKind.HOST_BLIP && a.subject === "flapping") key += ".flapping"; // the quiet blip records keep "Host blip"
+  if (a.kind === AlertKind.PATH_LOSSY && params.open) key += ".filtered"; // a filter on the way, not a lossy line (its why is .filtered too)
   if ((a.kind === AlertKind.DOCTOR_WARN || a.kind === AlertKind.DOCTOR_FAIL) && params.check) params.check_title = checkTitle(t, params.check);
   if (a.kind === AlertKind.COUNTRY_BLOCKED) {
     params.country = countryIn(t, params.country ?? "");
@@ -131,6 +132,8 @@ export function alertWhy(t: T, fmt: Fmt, a: Alert): string {
   if (a.kind === AlertKind.NODE_DOWN && a.params.minutes) params.duration = fmt.duration(Number(a.params.minutes) * 60);
   if (a.kind === AlertKind.ACCESS_ENDED && Number(a.params.since) > 0) params.date = fmt.stamp(Number(a.params.since));
   if (a.kind === AlertKind.USERS_IMPACTED) params.protocol = protocolName(a.subject);
+  // a scheduled task that keeps failing names its last reason as a code (tasks.proto RUN REASONS)
+  if (a.kind === AlertKind.SCHEDULED_TASK_FAILING && a.params.reason) params.reason = lookup(t, `task.reason.${a.params.reason}`) ?? a.params.reason;
   if (a.kind === AlertKind.TORRENT) return lookup(t, a.whyKey, torrentParams(t, params)) ?? "";
   if (a.kind === AlertKind.COUNTRY_BLOCKED) {
     // "RU" and "443, 8443" as the sentence needs them: "from Russia", "ports 443 and 8443"
@@ -324,8 +327,9 @@ export function groupFact(t: T, g: readonly Alert[]): string {
     const lost = Math.max(...g.map((x) => lossPct(Number(x.params.sent), Number(x.params.got))));
     return t(g.length > 1 ? "hl.alerts.fact.lossUpTo" : "hl.alerts.fact.loss", { lost });
   }
-  // the worst port of the lossy sender's run
-  if (a.kind === AlertKind.PATH_LOSSY) return t("hl.alerts.fact.loss", { lost: lossPct(Number(a.params.sent), Number(a.params.got)) });
+  // the worst port of the lossy sender's run; a filtered path names the ports that got through instead of "100 % lost"
+  if (a.kind === AlertKind.PATH_LOSSY)
+    return a.params.open ? t("hl.alerts.fact.filtered", { open: a.params.open }) : t("hl.alerts.fact.loss", { lost: lossPct(Number(a.params.sent), Number(a.params.got)) });
   if (a.kind === AlertKind.COUNTRY_BLOCKED) {
     const n = alertNetworks(a.params.networks ?? "").length;
     return n > 1 ? t.n("hl.alerts.fact.nets", n) : "";

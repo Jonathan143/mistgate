@@ -1,3 +1,5 @@
+//go:build !js
+
 // Package mcp is the panel's MCP server for agents: the tools of the token profiles over
 // Streamable HTTP, and the stdio proxy that `mistgate mcp` runs.
 //
@@ -111,6 +113,7 @@ type AuditEntry struct {
 	Action string // "mcp_plan", "mcp_apply"
 	Params map[string]any
 	Result string // "ok" | "fail"
+	Source string // AuditMCP for external tools; AuditAssistant for assistant calls.
 }
 
 // Config wires the MCP layer.

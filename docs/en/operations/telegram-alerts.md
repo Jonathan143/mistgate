@@ -36,14 +36,14 @@ Once linked you can switch **Send me alerts** off without unlinking, **Send test
 | A new signed panel release | Owner | Once per version |
 | Node agents behind the release | Owner | Once per version, with the names of the nodes |
 | A failed [backup](backups.md) | Owner | Once, however often the schedule retries; and when the next backup works |
-| An MCP plan waiting for your approval | Owner | When the plan is made, with a link to **Integrations → Waiting for you**. You decide in the admin, never in the chat |
+| An MCP plan waiting for your approval | Owner | When the plan is made, with a link to **AI → Waiting for you**. You decide in the admin, never in the chat |
 | A lockout after too many failed sign-ins | Owner | When it happens |
 | A sign-in from an address this panel has not seen lately; a passkey added or removed, a password login added, a password or authenticator changed | Owner, and the admin it is about | When it happens |
 
 How the messages behave:
 
 - **Bursts become one message.** Events that arrive within about 30 seconds of each other are sent together, one message per chat; an identical line is not repeated.
-- **The same open alert is never sent twice.** When it resolves you get one message that says how long it lasted. An alert that a worse one replaced, one you accepted as normal and one you muted end without a message, and so does the device-limit alert.
+- **The same open alert is never sent twice.** When it resolves you get one message that says how long it lasted. An alert that a worse one replaced, one you accepted as normal, one you muted and one you closed end without a message, and so does the device-limit alert.
 - **Info-level alerts are not sent.** Only warnings and critical ones are (a fixed floor in this version; there are no quiet hours or filters yet).
 - **Short, in the panel language.** Messages are in English, Russian or Simplified Chinese, whichever the panel's default language is (**Settings → Interface → Default language**); a panel in Persian or Turkish sends them in English. Names that come from data, such as a node, a profile or a token, are escaped and cut to one line.
 - **Never a secret.** A message holds no token, no subscription link and no password.

@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ToastProvider } from "@/components/ui/toast";
 import { Role } from "@/gen/mistgate/admin/v1/auth_pb";
 import { NodeStatus } from "@/gen/mistgate/admin/v1/common_pb";
+import { NodeUpdateState } from "@/gen/mistgate/admin/v1/update_pb";
 import { editionFeatures } from "@/i18n/edition";
 import { en } from "@/i18n/en";
 import { setLang } from "@/i18n";
@@ -14,8 +15,8 @@ import { meQuery } from "@/lib/session";
 import { updatesQuery } from "@/lib/updates";
 import { NodesScreen } from "./nodes";
 
-// Nodes: tick several nodes, "Set decoy site" for all of them at once. Own is off while one of them has no uploaded site, and in
-// the Cloudflare edition.
+// Nodes: tick several nodes, then "More ▾ → Decoy site…" in the bulk bar sets one mode for all of them in one call, and the
+// bar lists each node with its state read live. Own is off while one of them has no uploaded site, and in the Cloudflare edition.
 
 const setNodesDecoyMode = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -24,11 +25,14 @@ vi.mock("@/lib/api", () => ({
   auth: { me: () => Promise.resolve({}) },
 }));
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children, to, className }: { children?: ReactNode; to: string; className?: string }) => (
-    <a href={to} className={className}>
+  Link: ({ children, to, className, title, tabIndex }: { children?: ReactNode; to: string; className?: string; title?: string; tabIndex?: number }) => (
+    <a href={to} className={className} title={title} tabIndex={tabIndex}>
       {children}
     </a>
   ),
+  useBlocker: () => ({ status: "idle" }),
+  useSearch: () => ({}),
+  useNavigate: () => vi.fn(),
 }));
 vi.mock("@/components/add-node", () => ({ useAddNode: () => vi.fn() }));
 
@@ -52,6 +56,7 @@ const node = (name: string, over: Record<string, unknown> = {}) => ({
   countryCode: "DE",
   location: "",
   provider: "",
+  notes: "",
   address: `${name}.example.com`,
   status: NodeStatus.ONLINE,
   protocols: ["hysteria2"],
@@ -69,13 +74,13 @@ const node = (name: string, over: Record<string, unknown> = {}) => ({
 });
 const withBundle = { decoyBundleSha256: "ab".repeat(32) };
 
-async function mount(nodes: ReturnType<typeof node>[], me: Record<string, unknown> = { admin: { id: "adm_1", role: Role.OWNER } }) {
+async function mount(nodes: ReturnType<typeof node>[], me: Record<string, unknown> = { admin: { id: "adm_1", role: Role.OWNER } }, updates: Record<string, unknown>[] = []) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(meQuery.queryKey, me as never);
-  qc.setQueryData(updatesQuery.queryKey, { nodes: [] } as never);
+  qc.setQueryData(updatesQuery.queryKey, { nodes: updates } as never);
   qc.setQueryData(nodesQuery.queryKey, { nodes, expectedAgentVersion: "0.3.1" } as never);
   await act(async () =>
     root!.render(
@@ -89,30 +94,115 @@ async function mount(nodes: ReturnType<typeof node>[], me: Record<string, unknow
 }
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))));
 const text = () => document.body.textContent ?? "";
-const button = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
-const tick = (name: string) => document.querySelector<HTMLInputElement>(`input[type=checkbox][aria-label="${en["decoy.bulk.select"].replace("{name}", name)}"]`)!;
+const tick = (name: string) => document.querySelector<HTMLInputElement>(`input[type=checkbox][aria-label="${en["bulk.select"].replace("{name}", name)}"]`)!;
 const radio = (mode: string) => document.querySelector<HTMLInputElement>(`input[type=radio][value=${mode}]`)!;
 const click = async (el: Element | null | undefined) => {
   await act(async () => void el?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
   await settle();
 };
+/** A Base UI menu opens on a press, not on a bare click. */
+const press = async (el: Element | null | undefined) => {
+  await act(async () => {
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) el?.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0 }));
+  });
+  await settle();
+};
+const bar = () => document.querySelector("[data-bulk-bar]");
+/** More ▾ → Decoy site… */
+const openDecoy = async () => {
+  await press([...(bar()?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.trim().startsWith(en["bulk.more"])));
+  await press([...document.querySelectorAll('[role="menuitem"]')].find((i) => i.textContent?.startsWith(en["bulk.decoy"])));
+};
+
+describe("node notes", () => {
+  it("shows plain-text notes in the table and mobile cards, with the full text only on the notes", async () => {
+    const notes = "<b>Renew in March</b>\n备用节点";
+    await mount([node("de1", { notes })]);
+    const summaries = [...document.querySelectorAll("p")].filter((p) => p.textContent === notes);
+    expect(summaries).toHaveLength(2);
+    expect(summaries.every((p) => p.querySelector("b") === null)).toBe(true);
+    expect([...document.querySelectorAll("a")].filter((a) => a.title === notes)).toHaveLength(2);
+    for (const summary of summaries) {
+      const link = summary.closest("a")!;
+      expect(link.title).toBe(notes);
+      expect(link.getAttribute("href")).toBe("/nodes/$id");
+      expect(link.tabIndex).toBe(-1); // the row link remains the single keyboard stop
+    }
+    const rowLinks = document.querySelectorAll("a.absolute");
+    expect(rowLinks).toHaveLength(2);
+    expect([...rowLinks].every((a) => !a.hasAttribute("title"))).toBe(true);
+  });
+
+  it("keeps the country chip on mobile cards", async () => {
+    await mount([node("de1")]);
+    expect([...document.querySelectorAll("span.bg-surface-2")].filter((span) => span.textContent === "DE")).toHaveLength(1);
+  });
+
+  it("omits empty and whitespace-only notes", async () => {
+    await mount([node("de1"), node("fi1", { notes: " \n\t " })]);
+    expect(document.querySelectorAll("p")).toHaveLength(0);
+    expect(document.querySelectorAll("a[title]")).toHaveLength(0);
+  });
+});
+
+describe("node status and metadata", () => {
+  it("says the status once, with one dot, and keeps the notes out of the heading", async () => {
+    await mount([node("de1", { notes: "Renew in March", provider: "examplehost" })]);
+    const names = [...document.querySelectorAll("b")].filter((b) => b.textContent === "de1");
+    expect(names).toHaveLength(2); // a table row and a card
+    for (const name of names) {
+      const heading = name.parentElement!;
+      expect(heading.textContent).toContain("examplehost");
+      expect(heading.textContent).not.toContain("Renew in March");
+      const view = name.closest("div.relative")!;
+      expect(view.querySelectorAll("span.rounded-full[aria-hidden]")).toHaveLength(1);
+      expect(view.textContent!.split(en["node.status.online"])).toHaveLength(2);
+    }
+  });
+
+  it("keeps diagnostic reasons without repeating the pending status", async () => {
+    await mount([node("de1", { status: NodeStatus.PENDING, reason: { code: "enrollment_expired", params: {} } })]);
+    expect(text().split(en["node.status.pending"])).toHaveLength(3);
+    expect(text().split(en["node.reason.enrollment_expired"])).toHaveLength(3);
+  });
+
+  it("keeps location metadata on the heading when notes are absent", async () => {
+    await mount([node("de1", { location: "Germany", provider: "examplehost" })]);
+    const names = [...document.querySelectorAll("b")].filter((b) => b.textContent === "de1");
+    expect(names).toHaveLength(2);
+    expect(names.every((name) => name.parentElement?.textContent?.includes("Germany · examplehost"))).toBe(true);
+    expect(document.querySelectorAll("p")).toHaveLength(0);
+  });
+
+  it("keeps the separate update action for an outdated healthy node", async () => {
+    await mount([node("de1")], undefined, [{ nodeId: "nod_de1", state: NodeUpdateState.OUTDATED }]);
+    const updates = [...document.querySelectorAll('a[href="/updates"]')];
+    expect(updates).toHaveLength(2);
+    expect(updates.every((a) => a.textContent?.includes("0.3.1"))).toBe(true);
+    // the table's line says the status itself; a card has the word beside the name already
+    expect(updates.map((a) => a.textContent!.replace(/ 0\.3\.1$/, "")).sort()).toEqual([en["nodes.agentOldLine"], en["nodes.agentOld"]].sort());
+    for (const update of updates) {
+      expect(update.closest("div.relative")!.textContent!.split(en["node.status.online"])).toHaveLength(2);
+    }
+  });
+});
 
 describe("ticking nodes", () => {
   it("shows how many are ticked, and clears them", async () => {
     await mount([node("de1"), node("fi1")]);
-    expect(button(en["decoy.bulk.action"])).toBeUndefined(); // nothing ticked: no bar
+    expect(bar()).toBeNull(); // nothing ticked: no bar
     await click(tick("de1"));
-    expect(text()).toContain("1 node selected");
+    expect(bar()?.textContent).toContain("1node selected");
     await click(tick("fi1"));
-    expect(text()).toContain("2 nodes selected");
-    await click(button(en["decoy.bulk.clear"]));
-    expect(text()).not.toContain("selected");
+    expect(bar()?.textContent).toContain("2nodes selected");
+    await click(document.querySelector(`[data-bulk-bar] button[aria-label="${en["bulk.clear"]}"]`));
+    expect(bar()).toBeNull();
   });
 
   it("ticks every shown node from the header box", async () => {
     await mount([node("de1"), node("fi1"), node("se1")]);
-    await click(document.querySelector(`input[aria-label="${en["decoy.bulk.selectAll"]}"]`));
-    expect(text()).toContain("3 nodes selected");
+    await click(document.querySelector(`input[aria-label="${en["bulk.selectAll"]}"]`));
+    expect(bar()?.textContent).toContain("3nodes selected");
   });
 
   it("is for the owner only", async () => {
@@ -129,22 +219,27 @@ describe("ticking nodes", () => {
 describe("Set decoy site", () => {
   it("sends the ticked nodes and the picked mode in one call", async () => {
     setNodesDecoyMode.mockResolvedValue({ nodes: [node("de1"), node("fi1")] });
-    await mount([node("de1"), node("fi1"), node("se1")]);
+    await mount([node("de1"), node("fi1", { decoyReasonCode: "pending" }), node("se1")]);
     await click(tick("de1"));
     await click(tick("fi1"));
-    await click(button(en["decoy.bulk.action"]));
+    await openDecoy();
     expect(document.querySelector("[role=dialog]")?.textContent).toContain("Decoy site for 2 nodes");
     await click(radio("panel"));
     await click([...document.querySelectorAll("[role=dialog] button")].find((b) => b.textContent?.trim() === en["decoy.apply"]));
+    expect(setNodesDecoyMode).toHaveBeenCalledTimes(1);
     expect(setNodesDecoyMode).toHaveBeenCalledWith({ nodeIds: ["nod_de1", "nod_fi1"], mode: "panel" });
+    expect(document.querySelector("[role=dialog]")).toBeNull();
+    // the bar lists both, each with its state from the live list (fi1 is still being applied)
+    const rows = [...document.querySelectorAll("[data-batch] li")].map((li) => li.textContent);
+    expect(rows).toEqual([expect.stringContaining(en["bulk.state.ok"]), expect.stringContaining(en["bulk.state.running"])]);
     expect(text()).toContain("Decoy site set on 2 nodes");
-    expect(text()).not.toContain("selected"); // the selection is cleared once it went through
+    expect(bar()?.textContent).toContain("2nodes selected"); // the selection stays for the next action
   });
 
   it("keeps own on while every ticked node has its uploaded site", async () => {
     await mount([node("de1", withBundle), node("fi1")]);
     await click(tick("de1"));
-    await click(button(en["decoy.bulk.action"]));
+    await openDecoy();
     expect(radio("own").disabled).toBe(false);
   });
 
@@ -152,7 +247,7 @@ describe("Set decoy site", () => {
     await mount([node("de1", withBundle), node("fi1")]);
     await click(tick("de1"));
     await click(tick("fi1"));
-    await click(button(en["decoy.bulk.action"]));
+    await openDecoy();
     expect(radio("own").disabled).toBe(true);
     expect(document.querySelector("[role=dialog]")?.textContent).toContain(en["decoy.bulk.ownBlocked"].replace("{names}", "fi1"));
   });
@@ -160,7 +255,7 @@ describe("Set decoy site", () => {
   it("turns own off in the Cloudflare edition", async () => {
     await mount([node("de1", { ...withBundle, decoyOwnAvailable: false })], { admin: { id: "adm_1", role: Role.OWNER }, edition: "edge", unavailable: [...editionFeatures] });
     await click(tick("de1"));
-    await click(button(en["decoy.bulk.action"]));
+    await openDecoy();
     expect(radio("own").disabled).toBe(true);
     expect(document.querySelector("[role=dialog]")?.textContent).toContain(en["err.unavailable_in_edition"].replace("{feature}", en["edition.feature.decoy_own"]));
   });
@@ -169,7 +264,7 @@ describe("Set decoy site", () => {
     setNodesDecoyMode.mockRejectedValue(new ConnectError("panel_unavailable", Code.FailedPrecondition));
     await mount([node("de1")]);
     await click(tick("de1"));
-    await click(button(en["decoy.bulk.action"]));
+    await openDecoy();
     await click(radio("panel"));
     await click([...document.querySelectorAll("[role=dialog] button")].find((b) => b.textContent?.trim() === en["decoy.apply"]));
     expect(document.querySelector("[role=dialog] [role=alert]")?.textContent).toBe(en["err.panel_unavailable"]);

@@ -1,5 +1,9 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { Segmented } from "@/components/ui/segmented";
+import { useIsPhone } from "@/lib/media";
+import { readPref, writePref } from "@/lib/storage";
+import { WaysGraph } from "./ways-graph";
 import { useState, type ReactNode } from "react";
 import { ActionBar, Block, SectionLabel } from "@/components/ui/bits";
 import { Button, buttonClass } from "@/components/ui/button";
@@ -21,6 +25,7 @@ import { checksQuery, countryColumn, countryIn, doctorQuery, type CountryCheck }
 import { nodeLoad } from "@/lib/node-load";
 import type { Plain } from "@/lib/plain";
 import { nodesQuery } from "@/lib/queries";
+import { useFresh } from "@/components/fx/fresh";
 import { candidatesQuery, countryHint, isCut, reachHint, relaysQuery, seenHint, type CountryHint, type Hint } from "@/lib/relay";
 import { useNow } from "@/lib/time";
 import { ipv6Helps } from "@/lib/reachability";
@@ -30,10 +35,11 @@ import { CountryRow } from "@/screens/health/country";
 import { EntryDialog, entryReason, EntryState, TurnOffDialog } from "./ipv6-entry";
 import { CheckPortsButton, portRows, Ports, usePortCheck } from "./ports";
 import { AddRelayDialog, ccChip, RelayRows, useAddRelay, useCountryOf, useRelayRuns, type Entry } from "./relays";
-import type { NodeSearch } from "./tabs";
+import { InSubscriptions } from "./subs-switches";
+import type { NodeSearch, WaysView } from "./tabs";
 
 // The node page's "Ways in" tab (node-ia plan §3.4): every way people reach the node, drawn as one line from people down
-// to the node with a branch per way (straight to its address, through another node, over IPv6), and on an entry node the
+// to the node with a branch per way (straight to its address, through a CDN, through another node, over IPv6), and on an entry node the
 // nodes reached through it. A list and the open way, like Reachability's sources; `?way=` is the open one, `?add=` the
 // "New way in" dialog ("ipv6": the IPv6 entry's). The verdicts are lib/ways.ts's, the relay rows and dialog relays.tsx's,
 // the IPv6 entry's card and dialog ipv6-entry.tsx's.
@@ -93,7 +99,9 @@ type Look = { kind: StatusKind; word: MessageKey };
 
 /** A lane's state in a word: what is ours to fix first, then how much of the country sees it. An IPv6 entry the node cannot take is "not available". */
 function lookOf(l: Lane, w: { offline: boolean; v6: Ipv6Entry }): Look {
-  if (w.offline && l.kind === "direct") return { kind: "off", word: "ways.pill.offline" };
+  if (w.offline && (l.kind === "direct" || l.kind === "cdn")) return { kind: "off", word: "ways.pill.offline" };
+  // every server of the lane is kept out of subscriptions: people are not given this way, the servers still run
+  if (l.hidden) return { kind: "off", word: "ways.pill.hidden" };
   switch (l.state) {
     case "bad":
       return { kind: "bad", word: "ways.pill.down" };
@@ -110,6 +118,9 @@ function lookOf(l: Lane, w: { offline: boolean; v6: Ipv6Entry }): Look {
 }
 
 const toneText: Record<StatusKind, string> = { ok: "text-muted", off: "text-muted", blip: "text-muted", busy: "text-muted", warn: "text-warn-text", bad: "text-danger-text" };
+
+/** The node's servers that people reach through a CDN (the "cdn" lane), whatever their state. */
+const cdnOf = (data: Data) => data.inbounds.filter((i) => i.cdn);
 
 /** The rows of the Direct lane's port check: its count in the list is the rows the lane shows. */
 const portsOf = (data: Data) => {
@@ -134,7 +145,8 @@ function seenWords(t: T, seen: Lane["seen"], dark: string[], cc: string): Hint {
 /** The third line of a lane: is it seen from the country (an entry against the networks that see this node dark). */
 function seenLine(t: T, l: Lane, w: WaysModel): Hint | null {
   if (l.kind === "out") return null;
-  if (l.kind === "direct" && w.offline) return { tone: "off", text: t("ways.offline") };
+  if ((l.kind === "direct" || l.kind === "cdn") && w.offline) return { tone: "off", text: t("ways.offline") };
+  if (l.kind === "cdn") return { tone: "off", text: t("ways.cdn.seen") };
   if (l.kind === "ipv6") {
     // an entry the node cannot take, or one that is on while the server's IPv6 is down: why, in the doctor's words
     if (l.state === "bad" || (l.state === "off" && !w.v6.entrySupported)) {
@@ -190,10 +202,12 @@ const rowCls =
 
 function LaneRow({ l, w, data, selected, tabbable, onPick }: { l: Lane; w: WaysModel; data: Data; selected: boolean; tabbable: boolean; onPick: () => void }) {
   const t = useT();
+  const fresh = useFresh<HTMLButtonElement>("lane", `${data.node!.id}:${l.id}`); // a lane that just came to be sweeps in once
   const ccOf = useCountryOf();
   const look = lookOf(l, w);
   const seen = seenLine(t, l, w);
-  const title = l.kind === "direct" ? t("ways.direct") : l.kind === "via" ? t("ways.via", { entry: l.peer!.name }) : l.kind === "ipv6" ? t("ways.ipv6") : l.peer!.name;
+  const title =
+    l.kind === "direct" ? t("ways.direct") : l.kind === "cdn" ? t("ways.cdn") : l.kind === "via" ? t("ways.via", { entry: l.peer!.name }) : l.kind === "ipv6" ? t("ways.ipv6") : l.peer!.name;
   const where =
     l.kind === "direct"
       ? data.inbounds.length === 0
@@ -203,7 +217,9 @@ function LaneRow({ l, w, data, selected, tabbable, onPick }: { l: Lane; w: WaysM
           : data.node!.address
       : l.kind === "ipv6"
         ? w.v6.entry || t(w.v6.entrySupported ? "ways.ipv6.lane.off" : "ways.ipv6.lane.na")
-        : t.n("ways.servers", l.relays.length);
+        : l.kind === "cdn"
+          ? t.n("ways.servers", cdnOf(data).length)
+          : t.n("ways.servers", l.relays.length);
   const mono = (l.kind === "direct" && data.inbounds.length > 0) || (l.kind === "ipv6" && !!w.v6.entry);
   // a lane broken on our side says so in words next to the ring's colour (how much of the country sees it is the line
   // below); the rest is said to a screen reader
@@ -212,6 +228,7 @@ function LaneRow({ l, w, data, selected, tabbable, onPick }: { l: Lane; w: WaysM
     <button
       type="button"
       role="tab"
+      ref={fresh}
       id={`way-tab-${l.id}`}
       aria-selected={selected}
       aria-controls="way-panel"
@@ -333,38 +350,84 @@ export function WaysTab({ data, ways: w }: { data: Data; ways: WaysModel }) {
   const all = [...w.lanes, ...w.out];
   const chosen = all.some((l) => l.id === search.way) ? search.way : undefined;
   const open = chosen ?? w.first;
-  const go = (next: NodeSearch, replace = true) => void navigate({ to: "/nodes/$id", params: { id: node.id }, search: { tab: "ways", ...next }, replace, resetScroll: false });
+  const phone = useIsPhone();
+  // the graph is for a wide screen; the view is the URL's, else the one this browser used last, else the list
+  const asked: WaysView | undefined = search.view === "graph" || search.view === "list" ? search.view : undefined;
+  const view: WaysView = phone ? "list" : (asked ?? (readPref("ways.view") === "graph" ? "graph" : "list"));
+  const go = (next: NodeSearch, replace = true) =>
+    void navigate({ to: "/nodes/$id", params: { id: node.id }, search: { tab: "ways", ...(asked ? { view: asked } : {}), ...(search.full ? { full: search.full } : {}), ...(search.from ? { from: search.from } : {}), ...next }, replace, resetScroll: false });
+  const full = view === "graph" && search.full === "1";
+  const setView = (v: WaysView) => {
+    writePref("ways.view", v);
+    go({ way: search.way, view: v });
+  };
   // a phone takes turns: opening moves the focus to the way back, going back (the link or the browser's) to the lane left
   const { pick, back } = useTurns({ chosen, backId: "way-back", rowId: (id) => `way-tab-${id}`, open: (id, replace) => go({ way: id }, replace), close: () => go({}) });
   const [relayOther, setRelayOther] = useState(false);
 
   if (!w.ready) return <Pending />;
   const lane = all.find((l) => l.id === open) ?? w.lanes[0]!;
+  const detail = (
+    <div role="tabpanel" id="way-panel" aria-labelledby={`way-tab-${lane.id}`} className="flex-1">
+      {lane.kind === "direct" ? (
+        <DirectDetail data={data} w={w} lane={lane} />
+      ) : lane.kind === "cdn" ? (
+        <CdnDetail data={data} w={w} lane={lane} />
+      ) : lane.kind === "ipv6" ? (
+        <Ipv6Detail data={data} w={w} lane={lane} onAdd={() => go({ way: "ipv6", add: "ipv6" })} />
+      ) : (
+        <RelayDetail key={lane.id} data={data} w={w} lane={lane} />
+      )}
+    </div>
+  );
   return (
-    // side by side from lg; between 720 and 1023 px (the sidebar still shown) the line stands above the open lane, and a
-    // phone takes turns
-    <div className="grid gap-3.5 lg:grid-cols-[336px_minmax(0,1fr)]">
-      <Line
-        data={data}
-        w={w}
-        open={open}
-        onPick={pick}
-        onAdd={() => go({ way: search.way, add: "1" })}
-        onRelayOther={() => setRelayOther(true)}
-        className={cx("lg:sticky lg:top-[72px]", chosen && "max-md:hidden")}
-      />
-      <div className={cx("flex min-w-0 flex-col gap-2.5", !chosen && "max-md:hidden")}>
-        <BackButton id="way-back" label={t("ways.back")} onClick={back} />
-        <div role="tabpanel" id="way-panel" aria-labelledby={`way-tab-${lane.id}`} className="flex-1">
-          {lane.kind === "direct" ? (
-            <DirectDetail data={data} w={w} lane={lane} />
-          ) : lane.kind === "ipv6" ? (
-            <Ipv6Detail data={data} w={w} lane={lane} onAdd={() => go({ way: "ipv6", add: "ipv6" })} />
-          ) : (
-            <RelayDetail key={lane.id} data={data} w={w} lane={lane} />
-          )}
+    <div className="flex flex-col gap-3.5">
+      {!phone && (
+        <div className="flex justify-end">
+          <Segmented
+            variant="flat"
+            aria-label={t("wg.view")}
+            value={view}
+            onValueChange={setView}
+            options={[
+              { value: "list", label: t("wg.view.list") },
+              { value: "graph", label: t("wg.view.graph") },
+            ]}
+          />
         </div>
-      </div>
+      )}
+      {view === "graph" ? (
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <WaysGraph
+            data={data}
+            w={w}
+            open={open}
+            onOpen={(id) => go({ way: id })}
+            onIpv6={() => go({ way: "ipv6", add: "ipv6" })}
+            detail={detail}
+            full={full}
+            onFull={(on) => void navigate({ to: "/nodes/$id", params: { id: node.id }, search: { tab: "ways", view: "graph", ...(search.way ? { way: search.way } : {}), ...(on ? { full: "1" as const } : {}) }, replace: true, resetScroll: false })}
+          />
+        </div>
+      ) : (
+        // side by side from lg; between 720 and 1023 px (the sidebar still shown) the line stands above the open lane, and a
+        // phone takes turns
+        <div className="grid gap-3.5 lg:grid-cols-[336px_minmax(0,1fr)]">
+          <Line
+            data={data}
+            w={w}
+            open={open}
+            onPick={pick}
+            onAdd={() => go({ way: search.way, add: "1" })}
+            onRelayOther={() => setRelayOther(true)}
+            className={cx("lg:sticky lg:top-[72px]", chosen && "max-md:hidden")}
+          />
+          <div className={cx("flex min-w-0 flex-col gap-2.5", !chosen && "max-md:hidden")}>
+            <BackButton id="way-back" label={t("ways.back")} onClick={back} />
+            {detail}
+          </div>
+        </div>
+      )}
       {w.owner && (
         <NewWayDialog
           data={data}
@@ -398,6 +461,7 @@ function DirectDetail({ data, w, lane }: { data: Data; w: WaysModel; lane: Lane 
   const look = lookOf(lane, w);
   const run = usePortCheck(node.id);
   const none = data.inbounds.length === 0;
+  const own = data.inbounds.filter((i) => !i.cdn);
   return (
     <DetailCard icon="globe" tone="mint" title={t("ways.direct")} sub={t("ways.direct.sub", { address: node.address })} control={<StatusPill sm kind={look.kind} label={t(look.word)} />}>
       {none && (
@@ -418,9 +482,28 @@ function DirectDetail({ data, w, lane }: { data: Data; w: WaysModel; lane: Lane 
           <Ports data={data} run={run} />
         </Block>
       )}
+      {own.length > 0 && <InSubscriptions nodeId={node.id} nodeName={node.name} address={node.address} inbounds={own} />}
       <SeenBlock w={w} name={node.name} check={w.country} />
       <ActionBar>
         <CheckPortsButton data={data} run={run} />
+        <Link to="/nodes/$id" params={{ id: node.id }} search={{ tab: "profiles" }} className={linkCls}>
+          {t("node.tab.profiles")}
+          <Icon name="chevronRight" size={14} />
+        </Link>
+      </ActionBar>
+    </DetailCard>
+  );
+}
+
+/** The profiles of the node that people reach through a CDN: the country sees the CDN, so there is no country verdict here. */
+function CdnDetail({ data, w, lane }: { data: Data; w: WaysModel; lane: Lane }) {
+  const t = useT();
+  const node = data.node!;
+  const look = lookOf(lane, w);
+  return (
+    <DetailCard icon="cloud" tone="mint" title={t("ways.cdn")} sub={t("ways.cdn.sub")} control={<StatusPill sm kind={look.kind} label={t(look.word)} />}>
+      <InSubscriptions nodeId={node.id} nodeName={node.name} address={node.address} inbounds={cdnOf(data)} cdn />
+      <ActionBar>
         <Link to="/nodes/$id" params={{ id: node.id }} search={{ tab: "profiles" }} className={linkCls}>
           {t("node.tab.profiles")}
           <Icon name="chevronRight" size={14} />
@@ -764,16 +847,22 @@ function NewWayDialog({ data, w, start, onClose, onIpv6 }: { data: Data; w: Ways
 
 // ---- the Overview's strip ----
 
-/** "Ways in  People → (◐ Direct · MTS) (● through msk1) (○ IPv6) → de1   All ways in ›" on the node's Overview. */
+/** "Ways in  People → (◐ Direct · MTS) (● CDN) (● through msk1) (○ IPv6) → de1   All ways in ›" on the node's Overview. */
 export function WaysStrip({ data, w }: { data: Data; w: WaysModel }) {
   const t = useT();
   const node = data.node!;
   if (!w.ready) return null;
-  const short = (l: Lane): string => {
+  // The note after a lane's name. A way seen on part of the networks names the dark ones; past two they become "+N" and the
+  // full list goes to the tooltip, so a long list cannot push the chip out of the card.
+  const short = (l: Lane): { text: string; full?: string } => {
     const look = lookOf(l, w);
-    if (look.kind === "ok") return "";
-    if (l.state === "ok" && l.seen === "part" && l.dark.length) return l.dark.join(", ");
-    return t(look.word);
+    if (look.kind === "ok") return { text: "" };
+    if (l.state === "ok" && l.seen === "part" && l.dark.length) {
+      const full = l.dark.join(", ");
+      if (l.dark.length <= 2) return { text: full, full };
+      return { text: t("ways.darkMore", { first: l.dark.slice(0, 2).join(", "), n: l.dark.length - 2 }), full };
+    }
+    return { text: t(look.word) };
   };
   return (
     <section aria-label={t("node.tab.ways")} className="flex flex-wrap items-center gap-x-2 gap-y-2 rounded-card border border-line bg-surface px-4 py-3">
@@ -784,18 +873,19 @@ export function WaysStrip({ data, w }: { data: Data; w: WaysModel }) {
       <Icon name="chevronRight" size={14} className="text-faint" aria-hidden />
       {w.lanes.map((l) => {
         const note = short(l);
-        const title = l.kind === "direct" ? t("ways.direct") : l.kind === "via" ? t("ways.via", { entry: l.peer!.name }) : t("ways.ipv6");
+        const title = l.kind === "direct" ? t("ways.direct") : l.kind === "cdn" ? t("ways.cdn") : l.kind === "via" ? t("ways.via", { entry: l.peer!.name }) : t("ways.ipv6");
         return (
           <Link
             key={l.id}
             to="/nodes/$id"
             params={{ id: node.id }}
             search={{ tab: "ways", way: l.id }}
-            className="inline-flex h-[26px] items-center gap-1.5 rounded-xl border border-line px-2.5 text-xs font-bold whitespace-nowrap transition-colors hover:border-accent-line hover:bg-surface-2"
+            title={note.full ? `${title} · ${t("ways.darkTitle", { list: note.full })}` : undefined}
+            className="inline-flex h-[26px] max-w-full min-w-0 items-center gap-1.5 rounded-xl border border-line px-2.5 text-xs font-bold whitespace-nowrap transition-colors hover:border-accent-line hover:bg-surface-2"
           >
             <RingMark ring={l.ring} />
-            {title}
-            {note && <span className={cx("font-semibold", toneText[lookOf(l, w).kind])}>· {note}</span>}
+            <span className="shrink-0">{title}</span>
+            {note.text && <span className={cx("min-w-0 truncate font-semibold", toneText[lookOf(l, w).kind])}>· {note.text}</span>}
           </Link>
         );
       })}

@@ -34,6 +34,7 @@ vi.mock("@/lib/api", async (orig) => ({
 vi.mock("@tanstack/react-router", () => ({
   useSearch: () => search,
   useNavigate: () => navigate,
+  useBlocker: () => ({ status: "idle" }),
   Link: ({ children, to, params, search: s, className, onClick, ...rest }: { children?: ReactNode; to: string; params?: object; search?: object; className?: string; onClick?: () => void }) => (
     <a href={to} data-params={JSON.stringify(params ?? {})} data-search={JSON.stringify(s ?? {})} className={className} onClick={onClick} aria-label={(rest as { "aria-label"?: string })["aria-label"]} data-tone={(rest as { "data-tone"?: string })["data-tone"]}>
       {children}
@@ -121,6 +122,18 @@ const type = (el: HTMLInputElement, value: string) =>
   });
 
 describe("the people list", () => {
+  it("picks a row by a click anywhere in the tick box's cell, and does not open the person", async () => {
+    await mount();
+    const cell = document.querySelector("table tbody tr td")!;
+    const box = () => cell.querySelector("[role=checkbox]")!;
+    expect(box().getAttribute("aria-checked")).toBe("false");
+    await click(cell); // next to the 18px box, not on it: what the owner hit
+    expect(box().getAttribute("aria-checked")).toBe("true");
+    await click(box()); // the box itself still toggles once
+    expect(box().getAttribute("aria-checked")).toBe("false");
+    expect(navigate).not.toHaveBeenCalledWith(expect.objectContaining({ to: "/users/$id" }));
+  });
+
   it("marks an active person who would get nothing, with the reason on hover", async () => {
     await mount();
     expect(text()).toContain("App"); // the column

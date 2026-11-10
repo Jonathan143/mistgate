@@ -54,7 +54,7 @@ The comments in the proto files are the reference for every field. Conventions (
 
 ## API tokens
 
-The owner creates tokens in **Integrations → API tokens → New token** (a fresh step-up is needed):
+The owner creates tokens in **AI → MCP and tokens → New token** (a fresh step-up is needed):
 
 | Field | Rule |
 |---|---|
@@ -195,11 +195,11 @@ A profile acts as an admin role: **Read only** as read-only, **Operator** as hel
 | `SubscriptionService.GetSubscriptionSettings`, `ListClients`, `TestUserAgent` | yes | yes | yes |
 | `UpdateService.GetUpdates` | yes | yes | yes |
 | `UserService.CreateUser`, `UpdateUser`, `SetUsersEnabled`, `ExtendUsers`, `ResetUserTraffic`, `RevokeDevice` | no | yes | yes |
-| `HealthService.MuteAlert`, `RunChecksNow`, `RunDoctor` | no | yes | yes |
+| `HealthService.MuteAlert`, `DismissAlert`, `RunChecksNow`, `RunDoctor` | no | yes | yes |
 | `AuthService.ListAudit` | no | no | yes |
 | `HealthService.ApplyFix` | no | no | only through an approved MCP plan |
 | `UpdateService.StartRollout`, `PauseRollout`, `ResumeRollout`, `CancelRollout`, `RollbackNode` | no | no | only through an approved MCP plan |
-| `UpdateService.ScheduleNodeUpdate`, `CancelNodeUpdateSchedule`, `SetUpdateTimezone` | no | no | only through an approved MCP plan |
+| `UpdateService.ScheduleNodeUpdate`, `CancelNodeUpdateSchedule`, `SetUpdateTimezone`, `SetUpdateDownloadTimeout` | no | no | only through an approved MCP plan |
 | `ProvisioningService.ListNodeServerAccess` (connection metadata, never a password) | no | no | yes |
 | `ProvisioningService.GetSSHFingerprint` | no | no | only while the MCP server makes a `node_install` plan |
 | `ProvisioningService.StartNodeProvision`, `RotateNodeServerPassword` | no | no | only through an approved MCP plan |
@@ -212,7 +212,7 @@ Closed to every token: deleting users, the subscription link, the Telegram proxy
 
 A token never passes step-up. Procedures that need a step-up, or that change what runs on the nodes, are never callable with a token directly; over the plain API they answer 403 "this needs the owner's approval; it is not available over the API".
 
-They are reachable only through the [MCP server](mcp.md) with an Admin token (the user page's app list from the Operator profile up): the agent plans the change, the owner reads the plan in **Integrations → Waiting for you** and approves it (with a step-up of their own), and only then does the agent's apply carry out the approved plan. The approval is checked in the database on every call, and the grant allows only the procedures listed on that plan. A plan expires 10 minutes after it was made.
+They are reachable only through the [MCP server](mcp.md) with an Admin token (the user page's app list from the Operator profile up): the agent plans the change, the owner reads the plan in **AI → Waiting for you** and approves it (with a step-up of their own), and only then does the agent's apply carry out the approved plan. The approval is checked in the database on every call, and the grant allows only the procedures listed on that plan. A plan expires 10 minutes after it was made.
 
 ## Limits
 

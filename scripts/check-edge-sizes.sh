@@ -18,7 +18,10 @@ entries=(
   # The program with every role: no longer in the release bundle (the five entries below are), it is what the Node tests and the e2e
   # bridge run, and the size the roles split. 42 MiB: about 3 MB above its size after the October 2026 diet, so a regression like
   # the 7.9 MB template one fails here. 45 MiB since the external reachability sources (cheburcheck, bsbord): every role's code.
-  "mistgate-edge:45"
+  # 46 MiB in November 2026: closing alerts, the server-side audit filters and retention, the split check rollup and the
+  # agent crash-loop alert are admin and jobs code the shipped Workers already carry within their own limits; this entry is
+  # their sum and ships nowhere. The node runtime, host history and path loss reads stay out of the edge (no MCP there).
+  "mistgate-edge:46"
   # Hot path: subscriptions, the person's page, devices. Measured 24.7 MiB (fleet + access + subs, no auth service).
   "mistgate-edge-public:28"
   # The agent link: wireCore plus the link driver. Measured 26.4 MiB.
@@ -29,7 +32,15 @@ entries=(
   # The admin API and the SPA: the largest role, every admin service. Measured 37.6 MiB; 40.1 MiB with the external reachability
   # sources (cheburcheck, bsbord), whose owner RPCs (settings, sealed keys, the paid-check preview) need the admin's step-up and
   # cannot live in jobs, where their ticks run.
-  "mistgate-edge-admin:43"
+  # 46 MiB in November 2026 (43.0 MiB measured, 4 KiB left): closing alerts, the server-side audit filters, the check
+  # rollup, retention settings and the request ids are admin RPCs and their messages, which is this Worker's job and has
+  # no other Worker to go to. What the edge does not use stays out: the node runtime, host history, path loss, probes and
+  # the panel's logs, export and metrics are VPS-only services (ProbeService, OpsService). Cloudflare's ceiling is 64 MiB;
+  # past about 55 MiB the owner-only rare functions move to a Worker of their own. The debug capture's agent messages
+  # (DebugCapture, DebugCaptureReport, SEVERITY_DEBUG) cost about 15 KB in every Worker, since each links the generated
+  # agentv1 package; its RPCs are the VPS-only OpsService. The Agent update timeout/progress controls are owner-facing
+  # admin RPCs and UI state, so they stay here rather than adding another Worker boundary.
+  "mistgate-edge-admin:46"
   # The Provisioner: wireCore plus the SSH client. Measured 29.4 MiB; 31.9 MiB in November 2026 with the panel's SSH key, the
   # authorized_keys management and the login by an own private key, which need that SSH client and so cannot live elsewhere.
   "mistgate-edge-provision:35"

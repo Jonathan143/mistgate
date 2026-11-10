@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"os"
 	"runtime"
 	"slices"
 	"strings"
@@ -39,6 +40,7 @@ import (
 	"github.com/mistgate/mistgate/internal/panel/update"
 	"github.com/mistgate/mistgate/internal/panel/vault"
 	"github.com/mistgate/mistgate/internal/panel/warp"
+	"github.com/mistgate/mistgate/internal/release"
 	"github.com/mistgate/mistgate/internal/statehash"
 )
 
@@ -61,7 +63,18 @@ func nodeUpdateConfig(dataDir string, edge, onEdge bool, key ed25519.PublicKey, 
 		gateHealth = gate
 	}
 	return update.Config{DataDir: dataDir, Key: key, PanelVersion: buildinfo.Version, PanelBuilt: buildinfo.BuiltUnix(),
-		Edge: edge, StepUp: stepUp, PanelUpdater: panelUpdater, NodeBundleSource: source, Log: log}, gateHealth
+		InitialChannel: os.Getenv("MISTGATE_UPDATE_CHANNEL"),
+		Edge:           edge, StepUp: stepUp, PanelUpdater: panelUpdater, NodeBundleSource: source, Log: log}, gateHealth
+}
+
+func configuredUpdateChannel(st *store.Store) release.Channel {
+	value, err := st.Setting(context.Background(), update.UpdateChannelSetting)
+	if err == nil {
+		if channel, ok := release.ParseChannel(value); ok {
+			return channel
+		}
+	}
+	return release.ChannelStable
 }
 
 // base is what every role needs from its Config: the defaults filled in, and the few values derived from it.
@@ -118,8 +131,8 @@ func (b base) fleetConfig(desired func(ctx context.Context, nodeID string) ([]st
 }
 
 // accessConfig is the access service's configuration, the same in every role.
-func (b base) accessConfig(fl *fleet.Fleet) access.Config {
-	return access.Config{SubscriptionBaseURL: b.subBase, Log: b.log, AfterResponse: b.c.AfterResponse, CheckPorts: fl.CheckPorts, CheckRelay: fl.CheckRelay}
+func (b base) accessConfig(fl *fleet.Fleet, stepUp func(context.Context) error) access.Config {
+	return access.Config{SubscriptionBaseURL: b.subBase, StepUp: stepUp, Log: b.log, AfterResponse: b.c.AfterResponse, CheckPorts: fl.CheckPorts, CheckRelay: fl.CheckRelay}
 }
 
 // usageRecompute is fleet.Config.OnUsage: a quota overrun takes effect right after the stats batch that crossed it.
@@ -174,20 +187,23 @@ func (p subParts) mux(b base, acc *access.Service) http.Handler {
 // Only the public Worker does without it: it builds the fleet and access it needs on their own.
 type core struct {
 	base
-	authSvc *auth.Service
-	tg      *telegram.Service
-	fl      *fleet.Fleet
-	acc     *access.Service
-	cr      *countryreach.Service
-	gp      *globalping.Service
-	cc      *cheburcheck.Service
-	bs      *bsbord.Service
-	bl      *blocklist.Service
-	cp      *countryprobe.Service
-	hl      *health.Service
-	upd     *update.Service
-	wsv     *warp.Service
-	desired func(ctx context.Context, nodeID string) ([]statehash.Inbound, error)
+	authSvc            *auth.Service
+	tg                 *telegram.Service
+	fl                 *fleet.Fleet
+	acc                *access.Service
+	cr                 *countryreach.Service
+	gp                 *globalping.Service
+	cc                 *cheburcheck.Service
+	bs                 *bsbord.Service
+	bl                 *blocklist.Service
+	cp                 *countryprobe.Service
+	hl                 *health.Service
+	upd                *update.Service
+	wsv                *warp.Service
+	asst               assistantRPC
+	assistantRetention assistantRetention
+	sched              scheduledTasks // the scheduled tasks (VPS only; nil on the edge)
+	desired            func(ctx context.Context, nodeID string) ([]statehash.Inbound, error)
 }
 
 // wireCore builds the telegram alerts, the fleet, access, Globalping and the health module, the node-agent updates and WARP,
@@ -247,7 +263,7 @@ func wireCore(c Config) (*core, error) {
 		return nil, err
 	}
 	fl := k.fl
-	acc, err = access.New(st, vlt, b.reg, fl, fl, b.accessConfig(fl))
+	acc, err = access.New(st, vlt, b.reg, fl, fl, b.accessConfig(fl, authSvc.RequireStepUp))
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +274,9 @@ func wireCore(c Config) (*core, error) {
 	k.cr = countryreach.New(st, log, c.Clock, func(ctx context.Context, since time.Time, family int) ([]string, []*adminv1.NodeReachabilityHistory, error) {
 		return hl.CountryHistory(ctx, since, family)
 	})
+	gpBase, gpPoll := censorSimGlobalping()
 	k.gp, err = globalping.New(globalping.Config{Store: st, Vault: vlt, StepUp: authSvc.RequireStepUp, Log: log, Now: c.Clock, Country: k.cr.Country,
+		BaseURL: gpBase, PollDelay: gpPoll,
 		OnChange: func(ctx context.Context) { hl.ReconcileCountry(ctx) }})
 	if err != nil {
 		return nil, err
@@ -277,6 +295,7 @@ func wireCore(c Config) (*core, error) {
 	// Bsbord, the paid mobile-operator source: the online nodes' addresses and TLS ports are read the way the health module reads
 	// them, hence the late binding to hl.
 	k.bs, err = bsbord.New(bsbord.Config{Store: st, Vault: vlt, StepUp: authSvc.RequireStepUp, Log: log, Now: c.Clock, Country: k.cr.Country,
+		BaseURL:  censorSimBsbord(),
 		Targets:  func(ctx context.Context) ([]health.CountryTarget, error) { return hl.CountryTargets(ctx) },
 		OnChange: func(ctx context.Context) { hl.ReconcileCountry(ctx) }, Edge: edge, RoundLease: callLease})
 	if err != nil {
@@ -358,7 +377,8 @@ func wireCore(c Config) (*core, error) {
 	// the panel's service user. Without one the Updates page says the panel cannot verify releases.
 	compiledKey, _ := buildinfo.ReleasePublicKey()
 	panelUpdater := update.NewGitHubPanelUpdater(update.PanelUpdateConfig{
-		CurrentBuilt: buildinfo.BuiltUnix(), Key: compiledKey, DataDir: c.DataDir, NotesURL: update.GitHubReleaseNotesURL,
+		CurrentBuilt: buildinfo.BuiltUnix(), Key: compiledKey, DataDir: c.DataDir,
+		Channel:     func() release.Channel { return configuredUpdateChannel(st) },
 		ServiceUnit: c.UpdateService, Enabled: update.PanelUpdateHostSupported(),
 		UseRootHelperService: update.PanelUpdateUsesRootHelperService(), Log: log,
 	})
@@ -373,6 +393,7 @@ func wireCore(c Config) (*core, error) {
 	if len(relKey) > 0 && c.DataDir != "" && !onEdge {
 		nodeBundleSource = update.NewGitHubNodeBundleSource(update.GitHubNodeBundleConfig{
 			DataDir: c.DataDir, Key: relKey, Log: log,
+			Channel: func() release.Channel { return configuredUpdateChannel(st) },
 		})
 	}
 	updateConfig, gateHealth := nodeUpdateConfig(c.DataDir, edge, onEdge, relKey, authSvc.RequireStepUp, panelUpdater, nodeBundleSource, hl, log)
@@ -382,6 +403,7 @@ func wireCore(c Config) (*core, error) {
 	}
 	upd := k.upd
 	fl.SetUpdates(upd)
+	wireNetworkBundleChanged(fl, upd)
 	hl.AddConditionSource(upd.Conditions)
 	tg.SetSources(telegram.Sources{
 		PanelRelease: func() (string, bool) {

@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -411,4 +412,98 @@ func TestDatabaseFilePermissions(t *testing.T) {
 		}
 	}
 	s2.Close()
+}
+
+// The agent-facing filters run in SQL: an action substring, an actor substring (id or name), a time window, and they
+// combine with the paging cursor, so a page is full of matching rows instead of being thinned afterwards.
+func TestAuditQuerySinceActorContains(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	now := time.Now()
+	add := func(at time.Time, actor, action, result string) {
+		t.Helper()
+		if err := s.Audit(ctx, at, AuditEntry{Actor: actor, Action: action, Result: result}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(now.Add(-48*time.Hour), "mcp:tok_a", "user_create", "ok")
+	add(now.Add(-2*time.Hour), "mcp:tok_a", "user_disable", "ok")
+	add(now.Add(-time.Hour), "token:tok_b", "node_restart", "fail")
+	add(now.Add(-time.Minute), "anonymous", "login", "fail")
+	actions := func(q AuditQuery) string {
+		t.Helper()
+		q.Limit = 100
+		rows, err := s.ListAuditQuery(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for i := len(rows) - 1; i >= 0; i-- {
+			out = append(out, rows[i].Action)
+		}
+		return strings.Join(out, " ")
+	}
+	if got := actions(AuditQuery{Since: now.Add(-24 * time.Hour)}); got != "user_disable node_restart login" {
+		t.Errorf("since: %s", got)
+	}
+	if got := actions(AuditQuery{Contains: "user_"}); got != "user_create user_disable" {
+		t.Errorf("contains: %s", got)
+	}
+	if got := actions(AuditQuery{Contains: "user%"}); got != "" {
+		t.Errorf("a percent sign is literal: %s", got)
+	}
+	if got := actions(AuditQuery{Actor: "tok_a"}); got != "user_create user_disable" {
+		t.Errorf("actor: %s", got)
+	}
+	if got := actions(AuditQuery{Actor: "tok_", Failed: true, Since: now.Add(-24 * time.Hour)}); got != "node_restart" {
+		t.Errorf("actor, failed and since: %s", got)
+	}
+}
+
+func TestPruneAudit(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	now := time.Now()
+	for i, age := range []time.Duration{500, 450, 401, 399, 1} {
+		if err := s.Audit(ctx, now.Add(-age*24*time.Hour), AuditEntry{Actor: "a", Action: fmt.Sprint("x", i), Result: "ok"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.PruneAudit(ctx, now.Add(-400*24*time.Hour), 2) // a batch smaller than the backlog
+	if err != nil || n != 3 {
+		t.Fatalf("pruned %d: %v", n, err)
+	}
+	rows, _ := s.ListAudit(ctx, "", 0, 10)
+	if len(rows) != 2 || rows[0].Action != "x4" || rows[1].Action != "x3" {
+		t.Fatalf("left: %+v", rows)
+	}
+}
+
+func TestPruneAuditCapsBatchesPerSweep(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	now := time.Now()
+	const batch = 2000
+	const rows = auditPruneMaxBatches*batch + 3
+	_, err := s.W.ExecContext(ctx, `WITH RECURSIVE seq(n) AS (
+		SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?
+	)
+	INSERT INTO audit (ts, actor, action, params, result, source)
+	SELECT ?, 'a', 'bulk', '{}', 'ok', 'panel' FROM seq`, rows, now.Add(-500*24*time.Hour).Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.PruneAudit(ctx, now.Add(-400*24*time.Hour), batch)
+	if err != nil || got != auditPruneMaxBatches*batch {
+		t.Fatalf("first sweep pruned %d: %v, want %d", got, err, auditPruneMaxBatches*batch)
+	}
+	var left int
+	if err := s.R.QueryRowContext(ctx, `SELECT count(*) FROM audit WHERE action = 'bulk'`).Scan(&left); err != nil || left != 3 {
+		t.Fatalf("rows after first sweep = %d, %v, want 3", left, err)
+	}
+	got, err = s.PruneAudit(ctx, now.Add(-400*24*time.Hour), batch)
+	if err != nil || got != 3 {
+		t.Fatalf("next sweep pruned %d: %v, want the remaining 3", got, err)
+	}
 }

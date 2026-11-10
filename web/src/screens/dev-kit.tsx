@@ -46,6 +46,7 @@ import { profileListQuery, protocolsQuery } from "@/screens/users/rpc";
 import { DevicesPanel } from "@/screens/users/user-detail";
 import { dnsPresetsQuery } from "@/screens/subscriptions/queries";
 import type { ProtocolInfo } from "@/gen/mistgate/admin/v1/profile_pb";
+import { HaloKit } from "./dev-kit-halo";
 import { FleetKit } from "./dev-kit-fleet";
 import { ProfileApprovalsKit, SettingsDemos } from "./dev-kit-settings";
 import { PolishKit } from "./dev-kit-polish";
@@ -55,9 +56,16 @@ import { UsersKit } from "./dev-kit-users";
 import { SubsKit } from "./dev-kit-subs";
 import { DecoyKit } from "./dev-kit-decoy";
 import { SSHKit } from "./dev-kit-ssh";
+import { BulkKit, BulkPage } from "./dev-kit-bulk";
+import { UsersBulkKit, UsersBulkPage } from "./dev-kit-users-bulk";
 import { HealthWarpKit } from "@/screens/dev-kit-health-warp";
 import { Ipv6Kit } from "./dev-kit-ipv6";
 import { PagingKit, UpdatesKit } from "./dev-kit-redesign";
+import { ReleaseKit } from "./dev-kit-release";
+import { RestoreKit } from "./dev-kit-restore";
+import { AiKit } from "./dev-kit-ai";
+import { FxKit } from "./dev-kit-fx";
+import { GraphKit } from "./dev-kit-graph";
 
 // Development only (see router.tsx): every primitive in one place, to look at in both themes and at
 // 390 and 1280 px. Plain English on purpose: this page never ships.
@@ -287,10 +295,13 @@ export default function DevKit() {
   const turnstile = useRef<TurnstileHandle>(null);
   const [replay, setReplay] = useState(0);
   const [linkDemo, setLinkDemo] = useState<"pw" | "plain" | "awg" | "nothing" | null>(null);
-  // ?only=dns|ads|edge|node|health|users|subs|approvals|ipv6|ports|ssh: one kit alone, for its screenshots
-  const only = { dns: DnsLinkKit, ads: DnsAdsKit, edge: EdgeKit, node: NodeDemos, health: HealthWarpKit, users: UsersKit, subs: SubsKit, approvals: ProfileApprovalsKit, ipv6: Ipv6Kit, ports: PortsKit, ssh: SSHKit }[
-    new URLSearchParams(location.search).get("only") ?? ""
-  ];
+  // ?only=dns|ads|edge|node|health|users|subs|approvals|ipv6|ports|ssh|bulk|bulk-users|graph: one kit alone, for its screenshots;
+  // ?only=bulk-page and bulk-users-page are whole pages (the Nodes screen, the People tab, in the shell's frame), drawn without the kit's column
+  const which = new URLSearchParams(location.search).get("only") ?? "";
+  if (which === "halo") return <HaloKit />;
+  if (which === "bulk-page") return <BulkPage />;
+  if (which === "bulk-users-page") return <UsersBulkPage />;
+  const only = { dns: DnsLinkKit, ads: DnsAdsKit, edge: EdgeKit, node: NodeDemos, health: HealthWarpKit, users: UsersKit, subs: SubsKit, approvals: ProfileApprovalsKit, fleet: FleetKit, ipv6: Ipv6Kit, ports: PortsKit, ssh: SSHKit, bulk: BulkKit, "bulk-users": UsersBulkKit, release: ReleaseKit, restore: RestoreKit, ai: AiKit, fx: FxKit, graph: GraphKit }[which];
   if (only) {
     const Kit = only;
     return (
